@@ -1,0 +1,30 @@
+{
+  "name": "campusaura-backend",
+  "version": "1.0.0",
+  "description": "CampusAura Backend API Server",
+  "type": "module",
+  "main": "src/server.mjs",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "dev": "nodemon src/server.mjs"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "multer": "^1.4.5-lts.1",
+    "helmet": "^7.1.0",
+    "express-rate-limit": "^7.1.5",
+    "express-validator": "^7.0.1",
+    "jsonwebtoken": "^9.0.2",
+    "bcrypt": "^5.1.1",
+    "mongodb": "^6.3.0",
+    "@google/genai": "^1.25.0",
+    "dotenv": "^16.3.1",
+    "axios": "^1.12.2",
+    "cheerio": "^1.1.2",
+    "node-cron": "^4.2.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
