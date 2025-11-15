@@ -1,0 +1,222 @@
+"""
+Documents routes with AI-powered analysis
+"""
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status, Form
+from fastapi.responses import FileResponse
+from typing import List, Optional
+from datetime import datetime
+import os
+import shutil
+from bson import ObjectId
+
+from app.middleware.auth import get_current_user
+from app.database import get_database
+from app.services.document_analyzer import DocumentAnalyzer
+
+router = APIRouter()
+analyzer = DocumentAnalyzer()
+
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+ALLOWED_EXTENSIONS = {'.pdf', '.doc', '.docx', '.ppt', '.pptx'}
+
+def allowed_file(filename: str) -> bool:
+    return any(filename.lower().endswith(ext) for ext in ALLOWED_EXTENSIONS)
+
+@router.get("/documents")
+async def get_all_documents(current_user: dict = Depends(get_current_user)):
+    """Get all documents"""
+    try:
+        db = get_database()
+        documents = []
+        cursor = db.documents.find().sort("uploadDate", -1)
+        
+        async for doc in cursor:
+            documents.append({
+                "id": str(doc["_id"]),
+                "originalname": doc.get("originalname"),
+                "filename": doc.get("filename"),
+                "mimetype": doc.get("mimetype"),
+                "size": doc.get("size"),
+                "uploadDate": doc.get("uploadDate").isoformat() if doc.get("uploadDate") else None,
+                "uploadedBy": doc.get("uploadedBy"),
+                "documentType": doc.get("documentType"),
+                "subject": doc.get("subject"),
+                "semester": doc.get("semester"),
+                "branch": doc.get("branch"),
+                "topics": doc.get("topics", []),
+                "keywords": doc.get("keywords", []),
+                "description": doc.get("description"),
+                "aiAnalyzed": doc.get("aiAnalyzed", False)
+            })
+        
+        return documents
+    except Exception as e:
+        print(f"Error fetching documents: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch documents")
+
+@router.post("/upload/document")
+async def upload_document(
+    file: UploadFile = File(...),
+    documentType: str = Form(...),
+    subject: str = Form(...),
+    semester: str = Form(...),
+    branch: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """Upload document with admin-provided metadata"""
+    file_path = None  # Initialize to avoid UnboundLocalError
+    try:
+        # Check permissions
+        if current_user.get('role', '').lower() not in ['admin', 'teacher']:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only admins and teachers can upload documents"
+            )
+        
+        # Validate file type
+        if not allowed_file(file.filename):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file type. Only PDF, Word, and PowerPoint files are allowed"
+            )
+        
+        # Generate unique filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_extension = os.path.splitext(file.filename)[1]
+        unique_filename = f"doc_{timestamp}_{file.filename}"
+        file_path = os.path.join(UPLOAD_DIR, unique_filename)
+        
+        # Save file
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        print(f"📤 Uploading document: {file.filename}")
+        print(f"📋 Type: {documentType} | Subject: {subject} | Semester: {semester}")
+        
+        # Create document record with admin-provided data
+        document_data = {
+            "filename": unique_filename,
+            "originalname": file.filename,
+            "mimetype": file.content_type,
+            "size": os.path.getsize(file_path),
+            "uploadDate": datetime.now(),
+            "uploadedBy": current_user.get('email', 'unknown'),
+            "filePath": file_path,
+            # Admin-provided metadata
+            "documentType": documentType,
+            "subject": subject,
+            "semester": int(semester),
+            "branch": branch,
+            "description": description or '',
+            "topics": [],
+            "keywords": [],
+            "extractedText": '',
+            "textLength": 0,
+            "aiAnalyzed": False  # Marked as manually entered by admin
+        }
+        
+        db = get_database()
+        result = await db.documents.insert_one(document_data)
+        
+        # Remove MongoDB _id from response, use string id instead
+        document_data.pop('_id', None)
+        
+        print(f"✅ Document uploaded successfully: {file.filename}")
+        
+        return {
+            "message": "Document uploaded successfully",
+            "document": {
+                "id": str(result.inserted_id),
+                "filename": document_data["filename"],
+                "originalname": document_data["originalname"],
+                "mimetype": document_data["mimetype"],
+                "size": document_data["size"],
+                "uploadDate": document_data["uploadDate"].isoformat(),
+                "uploadedBy": document_data["uploadedBy"],
+                "documentType": document_data["documentType"],
+                "subject": document_data.get("subject"),
+                "semester": document_data.get("semester"),
+                "branch": document_data.get("branch"),
+                "topics": document_data.get("topics", []),
+                "keywords": document_data.get("keywords", []),
+                "description": document_data.get("description", ""),
+                "aiAnalyzed": document_data["aiAnalyzed"]
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Clean up file if database operation fails
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+        print(f"Error uploading document: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload document: {str(e)}")
+
+@router.get("/documents/{document_id}/download")
+async def download_document(
+    document_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Download a document"""
+    try:
+        db = get_database()
+        document = await db.documents.find_one({"_id": ObjectId(document_id)})
+        
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        file_path = document.get("filePath")
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found on server")
+        
+        return FileResponse(
+            path=file_path,
+            filename=document.get("originalname"),
+            media_type=document.get("mimetype")
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error downloading document: {e}")
+        raise HTTPException(status_code=500, detail="Failed to download document")
+
+@router.delete("/documents/{document_id}")
+async def delete_document(
+    document_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Delete a document (Admin only)"""
+    try:
+        # Check if user is admin
+        if current_user.get('role', '').lower() != 'admin':
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin access required"
+            )
+        
+        db = get_database()
+        document = await db.documents.find_one({"_id": ObjectId(document_id)})
+        
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Delete file from filesystem
+        file_path = document.get("filePath")
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+        
+        # Delete from database
+        await db.documents.delete_one({"_id": ObjectId(document_id)})
+        
+        return {"message": "Document deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error deleting document: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete document")
