@@ -1,6 +1,8 @@
 import React, { useState, FormEvent, useRef, useEffect, useCallback } from 'react';
 import { User, UserRole, ChatMessage, GroundingSource, Announcement, Document } from '../types';
 import { Spinner, SendIcon, UserIcon, SparklesIcon, TypingIndicator, LinkIcon, MicrophoneIcon } from './Icons';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 // TODO: Frontend should call /api/chat endpoint instead of using AI directly
 // import { GoogleGenAI, Modality, LiveServerMessage, Blob } from "@google/genai";
 
@@ -350,6 +352,10 @@ Ask me anything about your college! I'll provide specific, accurate information 
         setIsLoading(true);
         setError(null);
 
+        // Add typing indicator message
+        const typingMessage: ChatMessage = { role: 'model', content: '' };
+        setMessages(prev => [...prev, typingMessage]);
+
         try {
             const userContext = getRoleBasedContext(user, documents, users);
             
@@ -392,13 +398,15 @@ Ask me anything about your college! I'll provide specific, accurate information 
                 } : undefined
             };
             
-            setMessages(prev => [...prev, aiMessage]);
+            // Remove typing indicator and add actual response
+            setMessages(prev => [...prev.slice(0, -1), aiMessage]);
 
         } catch (err: any) {
             console.error('AI chat error:', err);
             const errorMessage = err.message || "Sorry, I'm having trouble connecting right now. Please try again later.";
             setError(errorMessage);
-            setMessages(prev => [...prev, { role: 'model', content: errorMessage }]);
+            // Remove typing indicator and add error message
+            setMessages(prev => [...prev.slice(0, -1), { role: 'model', content: errorMessage }]);
         } finally {
             setIsLoading(false);
         }
@@ -438,7 +446,17 @@ Ask me anything about your college! I'll provide specific, accurate information 
                            </div>
                         )}
                          <div className={`max-w-xs md:max-w-md p-3 rounded-2xl ${msg.role === 'user' ? 'bg-indigo-500 text-white rounded-br-none' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-bl-none'}`}>
-                            {msg.content === '' && msg.role === 'model' ? <TypingIndicator /> : <p className="text-sm" style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</p>}
+                            {msg.content === '' && msg.role === 'model' ? (
+                                <TypingIndicator />
+                            ) : msg.role === 'model' ? (
+                                <div className="text-sm prose prose-sm dark:prose-invert max-w-none">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                        {msg.content}
+                                    </ReactMarkdown>
+                                </div>
+                            ) : (
+                                <p className="text-sm" style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+                            )}
                         </div>
                          {msg.role === 'user' && (
                              <div className="w-8 h-8 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center text-gray-600 dark:text-gray-300 flex-shrink-0">

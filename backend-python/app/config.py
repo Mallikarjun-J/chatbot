@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str
     OPENAI_API_KEY: Optional[str] = None
     
+    # College Information
+    COLLEGE_NAME: str = "College"
+    COLLEGE_LOCATION: str = "India"
+    
     # Email Configuration
     SMTP_HOST: str = "smtp.gmail.com"  # Default to Gmail
     SMTP_PORT: int = 587

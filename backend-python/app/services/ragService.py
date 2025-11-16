@@ -78,12 +78,35 @@ Context:
 
 Question: {question}
 
-Instructions:
-- Answer based on the context provided
-- Be specific with numbers and statistics
-- If information is not in context, say so
-- Format answers clearly with bullet points if listing multiple items
-- Include relevant branch names, packages, percentages when applicable
+CRITICAL FORMATTING RULES:
+1. Use **bold headings** with emojis: **## 📊 Title**
+2. ALWAYS add a blank line after each section
+3. ALWAYS add a blank line before each new heading
+4. Use markdown tables for branch-wise data
+5. Add blank line after tables
+6. Use **bold** for numbers
+
+Table format:
+| Branch | Placed | Placement % | Highest CTC | Average CTC |
+|--------|--------|-------------|-------------|-------------|
+| CSE    |153/203 | 75.37%      | 33.0 LPA    | 9.31 LPA |
+
+EXAMPLE OUTPUT FORMAT:
+
+**## 📊 Overall Statistics**
+
+• Total Students: **1027**
+• Students Placed: **658**
+
+**## 💼 Branch-wise Placement Data**
+
+[Table here]
+
+**## 🏆 Key Insights**
+
+• Best branch: CIVIL **83.87%**
+
+Remember: Blank line after EVERY section!
 
 Answer:"""
     

@@ -204,10 +204,12 @@ async def simple_chat(request: Request):
                     logger.info(f"📝 Answer length: {len(answer_text)} chars")
                     logger.info(f"📝 Answer preview: {answer_text[:100]}...")
                     return JSONResponse(content={
-                        "response": answer_text,
+                        "content": answer_text,  # Frontend expects 'content' not 'response'
+                        "response": answer_text,  # Keep for compatibility
                         "model": "RAG with Gemini 2.5 Flash",
                         "rag_used": True,
                         "confidence": rag_result['confidence'],
+                        "sources": rag_result.get('sources', []),
                         "sources_count": len(rag_result.get('sources', []))
                     })
                 else:
@@ -275,7 +277,31 @@ async def simple_chat(request: Request):
         # Build full prompt
         context = "\n".join(context_parts) if context_parts else "No campus data available yet."
         
-        full_prompt = f"""You are CampusAura AI, a helpful assistant for a college campus management system.
+        # Detect if this is a general college life question
+        general_keywords = ['college life', 'campus culture', 'student life', 'how is', 'what is it like', 
+                           'tell me about', 'describe', 'experience', 'activities', 'clubs', 'hostel', 
+                           'library', 'cafeteria', 'sports', 'facilities', 'infrastructure']
+        is_general_question = any(keyword in user_message.lower() for keyword in general_keywords)
+        
+        if is_general_question:
+            college_name = settings.COLLEGE_NAME
+            college_location = settings.COLLEGE_LOCATION
+            full_prompt = f"""You are CampusAura AI, a helpful assistant for {college_name} students.
+
+The student is asking a general question about college life, campus culture, or experiences at {college_name}.
+
+College Information:
+- College Name: {college_name}
+- Location: {college_location}
+
+Campus Context (if available):
+{context}
+
+Student Question: {user_message}
+
+IMPORTANT: When answering about college life, campus culture, facilities, or experiences, provide information specifically about {college_name} in {college_location}. Use your knowledge about this specific college to give accurate insights. If you need to search for information, focus on {college_name}. If our campus data has relevant information, include it. Provide helpful guidance about this college's student life, activities, facilities, and what students can expect at {college_name}."""
+        else:
+            full_prompt = f"""You are CampusAura AI, a helpful assistant for a college campus management system.
 
 Campus Context:
 {context}

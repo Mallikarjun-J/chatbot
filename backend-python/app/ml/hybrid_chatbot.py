@@ -38,7 +38,7 @@ class HybridChatbot:
         
         # Models to try (with fallbacks)
         self.models = [
-            'gemini-2.5-flash'
+            'gemini-2.5-flash',
             'gemini-2.0-flash-exp',
             'gemini-1.5-flash-latest',
             'gemini-1.5-pro-latest'
@@ -231,7 +231,7 @@ User Role: {user_role or 'Guest'}
                         model_name=model_name,
                         generation_config={
                             "temperature": 0.7,
-                            "max_output_tokens": 500,
+                            "max_output_tokens": 200,
                         },
                         system_instruction=system_prompt
                     )
