@@ -1,7 +1,0 @@
-# ML Model Storage Directory
-
-This directory stores trained ML models:
-- `content_classifier.pkl` - Trained content classification model
-- `embeddings/` - Cached embedding models (auto-downloaded)
-
-**Note:** Models are automatically created when you run the application for the first time.
