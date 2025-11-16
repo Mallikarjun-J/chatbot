@@ -20,7 +20,7 @@ from app.database import connect_db, close_db, seed_database, create_indexes, ge
 # from app.ml.embeddings import EmbeddingService
 
 # Import routers
-from app.routes import auth, users, announcements, timetables, teacher_timetables, teacher_classes, documents  # , scraping, knowledge_base
+from app.routes import auth, users, announcements, timetables, teacher_timetables, teacher_classes, documents, scraping, file_upload  # , semanticSearch, knowledge_base
 
 
 # Configure logging
@@ -167,7 +167,7 @@ async def api_status():
 # Simple chat endpoint using Gemini API directly (without ML dependencies)
 @app.post("/api/chat")
 async def simple_chat(request: Request):
-    """Simple chat endpoint using Gemini API (no ML dependencies required)"""
+    """Simple chat endpoint using Gemini API with RAG for placement queries"""
     try:
         import google.generativeai as genai
         
@@ -182,6 +182,38 @@ async def simple_chat(request: Request):
                 status_code=400,
                 content={"error": "Message is required"}
             )
+        
+        # Check if this is a placement-related query - use RAG if so
+        placement_keywords = ['placement', 'placed', 'package', 'salary', 'company', 'companies', 
+                             'ctc', 'offer', 'recruit', 'hiring', 'job', 'career', '2025', 'batch']
+        
+        is_placement_query = any(keyword in user_message.lower() for keyword in placement_keywords)
+        
+        if is_placement_query:
+            logger.info("🎯 Detected placement query - using RAG service")
+            try:
+                # Import RAG service (lazy import)
+                from app.services.ragService import rag_service
+                
+                # Use RAG service for placement queries
+                rag_result = rag_service.query(user_message, n_results=5)
+                
+                if rag_result['confidence'] != 'low':
+                    answer_text = rag_result['answer']
+                    logger.info(f"✅ RAG returned answer with {rag_result['confidence']} confidence")
+                    logger.info(f"📝 Answer length: {len(answer_text)} chars")
+                    logger.info(f"📝 Answer preview: {answer_text[:100]}...")
+                    return JSONResponse(content={
+                        "response": answer_text,
+                        "model": "RAG with Gemini 2.5 Flash",
+                        "rag_used": True,
+                        "confidence": rag_result['confidence'],
+                        "sources_count": len(rag_result.get('sources', []))
+                    })
+                else:
+                    logger.warning("RAG confidence low, falling back to simple chat")
+            except Exception as rag_error:
+                logger.warning(f"RAG service failed, falling back to simple chat: {rag_error}")
         
         # Configure Gemini API
         genai.configure(api_key=settings.GEMINI_API_KEY)
@@ -377,6 +409,9 @@ app.include_router(timetables.router, tags=["Student Timetables"])
 app.include_router(teacher_timetables.router, tags=["Teacher Timetables"])
 app.include_router(teacher_classes.router, tags=["Teacher Classes"])
 app.include_router(documents.router, prefix="/api", tags=["Documents"])
+app.include_router(scraping.router, tags=["Web Scraping"])
+app.include_router(file_upload.router, tags=["File Upload & Analysis"])
+# app.include_router(semanticSearch.router, tags=["Semantic Search & RAG"])  # Disabled - use hybrid chatbot with RAG integration
 # app.include_router(knowledge_base.router, prefix="/api/knowledge-base", tags=["Knowledge Base"])
 
 
@@ -385,6 +420,6 @@ if __name__ == "__main__":
         "main:app",
         host=settings.HOST,
         port=settings.PORT,
-        reload=settings.ENVIRONMENT == "development",
+        reload=False,  # Disabled reload to avoid import issues with ML packages
         log_level="info"
     )

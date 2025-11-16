@@ -9,10 +9,11 @@ from pptx import Presentation
 import google.generativeai as genai
 from typing import Dict, Optional
 import re
+from app.config import settings
 
 class DocumentAnalyzer:
     def __init__(self):
-        api_key = os.getenv('GEMINI_API_KEY')
+        api_key = settings.GEMINI_API_KEY
         if api_key:
             genai.configure(api_key=api_key)
             self.model = genai.GenerativeModel('gemini-2.5-flash')

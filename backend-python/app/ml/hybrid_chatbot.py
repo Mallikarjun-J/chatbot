@@ -12,6 +12,14 @@ from app.database import db, map_documents
 from app.ml.embeddings import EmbeddingService
 from app.ml.content_classifier import ContentClassifier
 
+# Lazy import RAG service to avoid import issues
+rag_service = None
+try:
+    from app.services.ragService import rag_service as _rag
+    rag_service = _rag
+except Exception as e:
+    logger.warning(f"RAG service not available: {e}")
+
 
 class HybridChatbot:
     """
@@ -30,6 +38,7 @@ class HybridChatbot:
         
         # Models to try (with fallbacks)
         self.models = [
+            'gemini-2.5-flash'
             'gemini-2.0-flash-exp',
             'gemini-1.5-flash-latest',
             'gemini-1.5-pro-latest'
@@ -161,6 +170,33 @@ class HybridChatbot:
             Dict with response content, sources, metadata
         """
         try:
+            # Check if this is a placement-related query - use RAG if so
+            placement_keywords = ['placement', 'placed', 'package', 'salary', 'company', 'companies', 
+                                 'ctc', 'offer', 'recruit', 'hiring', 'job', 'career', '2025']
+            
+            is_placement_query = any(keyword in message.lower() for keyword in placement_keywords)
+            
+            if is_placement_query and rag_service:
+                logger.info("Detected placement query - using RAG service")
+                try:
+                    # Use RAG service for placement queries
+                    rag_result = rag_service.query(message, n_results=5)
+                    
+                    if rag_result['confidence'] != 'low':
+                        return {
+                            "content": rag_result['answer'],
+                            "sources": rag_result.get('sources', []),
+                            "metadata": {
+                                "model": "RAG with Gemini 2.5 Flash",
+                                "ml_enabled": True,
+                                "semantic_search_used": True,
+                                "rag_used": True,
+                                "confidence": rag_result['confidence']
+                            }
+                        }
+                except Exception as rag_error:
+                    logger.warning(f"RAG service failed, falling back to hybrid: {rag_error}")
+            
             # Build knowledge context using ML
             knowledge = await self.build_knowledge_context(
                 query=message,

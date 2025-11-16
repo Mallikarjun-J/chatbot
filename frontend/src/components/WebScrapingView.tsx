@@ -5,50 +5,48 @@ interface WebScrapingViewProps {
     onBack: () => void;
 }
 
-interface KnowledgeBaseEntry {
-    id: string;
+interface ScrapedPage {
     url: string;
     pageTitle: string;
     metaDescription: string;
-    summary: string;
-    scrapedAt: string;
     sections: Array<{
         heading: string;
         content: string;
         level: number;
     }>;
-    links: Array<{
-        text: string;
-        url: string;
-    }>;
     tables: Array<{
         index: number;
         rows: string[][];
+    }>;
+    links: Array<{
+        text: string;
+        url: string;
     }>;
     contactInfo: {
         emails: string[];
         phones: string[];
     };
+    scrapedAt: string;
+    depth: number;
+}
+
+interface ScrapeConfig {
+    url: string;
+    enabled: boolean;
+    schedule?: string;
+    maxDepth?: number;
 }
 
 const WebScrapingView: React.FC<WebScrapingViewProps> = ({ onBack }) => {
     const [url, setUrl] = useState('');
+    const [maxDepth, setMaxDepth] = useState(3);
     const [isLoading, setIsLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
-    const [scrapedData, setScrapedData] = useState<ScrapedAnnouncement[]>([]);
-    const [classifiedData, setClassifiedData] = useState<ClassifiedData | null>(null);
+    const [scrapedPages, setScrapedPages] = useState<ScrapedPage[]>([]);
+    const [stats, setStats] = useState<any>(null);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
-    const [config, setConfig] = useState<ScrapeConfig>({ url: '', enabled: false });
-    
-    // Advanced selectors
-    const [showAdvanced, setShowAdvanced] = useState(false);
-    const [selectors, setSelectors] = useState({
-        container: '',
-        title: '',
-        content: '',
-        date: ''
-    });
+    const [config, setConfig] = useState<ScrapeConfig>({ url: '', enabled: false, maxDepth: 3 });
 
     // Load existing configuration
     useEffect(() => {
@@ -68,28 +66,28 @@ const WebScrapingView: React.FC<WebScrapingViewProps> = ({ onBack }) => {
                 const data = await response.json();
                 setConfig(data);
                 if (data.url) setUrl(data.url);
-                if (data.selectors) setSelectors(data.selectors);
+                if (data.maxDepth) setMaxDepth(data.maxDepth);
             }
         } catch (err) {
             console.error('Failed to load config:', err);
         }
     };
 
-    const handleScrape = async (autoSave = false) => {
+    const handleScrape = async () => {
         if (!url.trim()) {
-            setError('Please enter a valid URL.');
+            setError('Please enter a valid college website URL.');
             return;
         }
         
         setIsLoading(true);
         setError(null);
         setSuccess(null);
-        setScrapedData([]);
-        setClassifiedData(null);
+        setScrapedPages([]);
+        setStats(null);
         
         try {
             const token = localStorage.getItem('authToken');
-            const response = await fetch('/api/scrape/announcements', {
+            const response = await fetch('/api/scrape/website', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -97,27 +95,25 @@ const WebScrapingView: React.FC<WebScrapingViewProps> = ({ onBack }) => {
                 },
                 body: JSON.stringify({
                     url: url.trim(),
-                    selectors: showAdvanced && selectors.container ? selectors : undefined,
-                    autoSave
+                    maxDepth: maxDepth,
+                    autoSave: true
                 })
             });
             
             const data = await response.json();
             
             if (!response.ok) {
-                throw new Error(data.error || 'Failed to scrape the URL');
+                const errorMsg = data.detail || data.error || data.message || 'Failed to scrape the website';
+                throw new Error(errorMsg);
             }
             
-            // Handle classified data
-            if (data.classified) {
-                setClassifiedData(data.classified);
-            } else {
-                setScrapedData(data.announcements || []);
-            }
-            
+            setScrapedPages(data.pages || []);
+            setStats(data.stats);
             setSuccess(data.message);
         } catch (err: any) {
-            setError(err.message || 'Failed to scrape the URL.');
+            console.error('Scraping error:', err);
+            const errorMessage = err.message || 'Failed to scrape the website. Please check the console for details.';
+            setError(errorMessage);
         } finally {
             setIsLoading(false);
         }
@@ -138,8 +134,8 @@ const WebScrapingView: React.FC<WebScrapingViewProps> = ({ onBack }) => {
                 },
                 body: JSON.stringify({
                     url: url.trim(),
-                    selectors: showAdvanced && selectors.container ? selectors : {},
-                    schedule: config.schedule || '0 */6 * * *',
+                    maxDepth: maxDepth,
+                    schedule: config.schedule || '0 0 * * 0',
                     enabled: config.enabled
                 })
             });
@@ -162,12 +158,15 @@ const WebScrapingView: React.FC<WebScrapingViewProps> = ({ onBack }) => {
         <div className="bg-gray-50 dark:bg-gray-700/50 p-6 rounded-lg shadow-sm space-y-6">
             <div className="flex justify-between items-center">
                 <div className="flex items-center space-x-3">
-                    <div className="bg-red-100 dark:bg-red-900/50 p-3 rounded-full">
-                        <ArrowUpOnSquareIcon className="w-6 h-6 text-red-500" />
+                    <div className="bg-blue-100 dark:bg-blue-900/50 p-3 rounded-full">
+                        <ArrowUpOnSquareIcon className="w-6 h-6 text-blue-500" />
                     </div>
-                    <h3 className="text-xl font-semibold text-gray-800 dark:text-white">College Website Scraper</h3>
+                    <div>
+                        <h3 className="text-xl font-semibold text-gray-800 dark:text-white">Knowledge Base Scraper</h3>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">Extract all information from your college website</p>
+                    </div>
                 </div>
-                <button onClick={onBack} disabled={isLoading} className="text-sm font-semibold text-red-600 dark:text-red-400 hover:underline disabled:opacity-50">
+                <button onClick={onBack} disabled={isLoading} className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50">
                     &larr; Back to Dashboard
                 </button>
             </div>
@@ -175,254 +174,178 @@ const WebScrapingView: React.FC<WebScrapingViewProps> = ({ onBack }) => {
             {/* Main Scraping Form */}
             <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow border border-gray-200 dark:border-gray-700 space-y-4">
                 <div>
-                    <h4 className="font-semibold text-gray-800 dark:text-white mb-2">College Announcements URL</h4>
+                    <h4 className="font-semibold text-gray-800 dark:text-white mb-2">🎓 College Website URL</h4>
                     <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                        Enter your college website's announcements or news page URL. The system will automatically extract announcements.
+                        Enter your college's main website URL. The system will automatically crawl all pages and extract:
+                        <span className="block mt-2 font-semibold">
+                            📄 Pages • 🎓 Departments • 📢 Announcements • 💼 Placements • 📚 Courses • 🏢 Facilities • 📞 Contact Info
+                        </span>
                     </p>
                 </div>
                 
-                <div className="space-y-3">
-                    <input
-                        type="url"
-                        value={url}
-                        onChange={(e) => setUrl(e.target.value)}
-                        placeholder="https://yourcollege.edu/announcements"
-                        className="w-full p-3 border border-gray-300 rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                        disabled={isLoading}
-                    />
-                    
-                    {/* Advanced Selectors Toggle */}
-                    <button
-                        onClick={() => setShowAdvanced(!showAdvanced)}
-                        className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                    >
-                        {showAdvanced ? '▼' : '▶'} Advanced CSS Selectors (Optional)
-                    </button>
-                    
-                    {showAdvanced && (
-                        <div className="grid grid-cols-2 gap-3 p-4 bg-gray-50 dark:bg-gray-900 rounded-md">
-                            <div>
-                                <label className="text-xs text-gray-600 dark:text-gray-400">Container Selector</label>
-                                <input
-                                    type="text"
-                                    value={selectors.container}
-                                    onChange={(e) => setSelectors({...selectors, container: e.target.value})}
-                                    placeholder=".announcement, article"
-                                    className="w-full p-2 text-sm border border-gray-300 rounded dark:bg-gray-800 dark:border-gray-600"
-                                />
-                            </div>
-                            <div>
-                                <label className="text-xs text-gray-600 dark:text-gray-400">Title Selector</label>
-                                <input
-                                    type="text"
-                                    value={selectors.title}
-                                    onChange={(e) => setSelectors({...selectors, title: e.target.value})}
-                                    placeholder="h2, .title"
-                                    className="w-full p-2 text-sm border border-gray-300 rounded dark:bg-gray-800 dark:border-gray-600"
-                                />
-                            </div>
-                            <div>
-                                <label className="text-xs text-gray-600 dark:text-gray-400">Content Selector</label>
-                                <input
-                                    type="text"
-                                    value={selectors.content}
-                                    onChange={(e) => setSelectors({...selectors, content: e.target.value})}
-                                    placeholder="p, .content"
-                                    className="w-full p-2 text-sm border border-gray-300 rounded dark:bg-gray-800 dark:border-gray-600"
-                                />
-                            </div>
-                            <div>
-                                <label className="text-xs text-gray-600 dark:text-gray-400">Date Selector</label>
-                                <input
-                                    type="text"
-                                    value={selectors.date}
-                                    onChange={(e) => setSelectors({...selectors, date: e.target.value})}
-                                    placeholder=".date, time"
-                                    className="w-full p-2 text-sm border border-gray-300 rounded dark:bg-gray-800 dark:border-gray-600"
-                                />
-                            </div>
-                        </div>
-                    )}
-                    
-                    <div className="flex gap-2">
-                        <button
-                            onClick={() => handleScrape(false)}
-                            disabled={isLoading || !url.trim()}
-                            className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 flex items-center justify-center gap-2 font-semibold"
-                        >
-                            {isLoading ? <Spinner className="w-5 h-5" /> : '🔍'} Preview Scrape
-                        </button>
-                        <button
-                            onClick={() => handleScrape(true)}
-                            disabled={isLoading || !url.trim()}
-                            className="flex-1 px-4 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 flex items-center justify-center gap-2 font-semibold"
-                        >
-                            {isLoading ? <Spinner className="w-5 h-5" /> : '💾'} Scrape & Save
-                        </button>
+                <div className="space-y-4">
+                    <div>
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-2">
+                            Website URL
+                        </label>
+                        <input
+                            type="url"
+                            value={url}
+                            onChange={(e) => setUrl(e.target.value)}
+                            placeholder="https://yourcollege.edu"
+                            className="w-full p-3 border border-gray-300 rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                            disabled={isLoading}
+                        />
                     </div>
+
+                    <div>
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-2">
+                            Crawl Depth (1-5): {maxDepth} levels
+                        </label>
+                        <input
+                            type="range"
+                            min="1"
+                            max="5"
+                            value={maxDepth}
+                            onChange={(e) => setMaxDepth(parseInt(e.target.value))}
+                            className="w-full"
+                            disabled={isLoading}
+                        />
+                        <div className="flex justify-between text-xs text-gray-500 mt-1">
+                            <span>Faster (1)</span>
+                            <span>Balanced (3)</span>
+                            <span>Complete (5)</span>
+                        </div>
+                    </div>
+                    
+                    <button
+                        onClick={handleScrape}
+                        disabled={isLoading || !url.trim()}
+                        className="w-full px-6 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-md hover:from-blue-700 hover:to-purple-700 disabled:from-gray-400 disabled:to-gray-400 flex items-center justify-center gap-2 font-semibold text-lg"
+                    >
+                        {isLoading ? (
+                            <>
+                                <Spinner className="w-6 h-6" />
+                                <span>Scraping Website... This may take a few minutes</span>
+                            </>
+                        ) : (
+                            <>
+                                <span>🚀</span>
+                                <span>Start Complete Website Scrape</span>
+                            </>
+                        )}
+                    </button>
                 </div>
 
                 {success && (
-                    <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
-                        <p className="text-sm text-green-700 dark:text-green-400">✅ {success}</p>
+                    <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
+                        <p className="text-sm text-green-700 dark:text-green-400 font-semibold">✅ {success}</p>
                     </div>
                 )}
                 
                 {error && (
-                    <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
-                        <p className="text-sm text-red-700 dark:text-red-400">❌ {error}</p>
+                    <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
+                        <p className="text-sm text-red-700 dark:text-red-400 font-semibold">❌ {error}</p>
                     </div>
                 )}
             </div>
 
-            {/* Classified Results */}
-            {classifiedData && (
-                <div className="space-y-4">
-                    <div className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 p-4 rounded-lg border-2 border-blue-200 dark:border-blue-800">
-                        <h4 className="text-lg font-bold text-gray-800 dark:text-white mb-2">
-                            🎯 Classification Results (Academic Year 2024-2025)
-                        </h4>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                            {classifiedData.filtered ? `Filtered out ${classifiedData.filtered} old items. ` : ''}
-                            Showing only current academic year data.
-                        </p>
+            {/* Statistics */}
+            {stats && (
+                <div className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 p-6 rounded-lg border-2 border-blue-200 dark:border-blue-800">
+                    <h4 className="text-lg font-bold text-gray-800 dark:text-white mb-4">📊 Scraping Statistics</h4>
+                    <div className="grid grid-cols-3 gap-4">
+                        <div className="bg-white dark:bg-gray-800 p-4 rounded-lg text-center">
+                            <div className="text-3xl font-bold text-blue-600">{stats.totalPages}</div>
+                            <div className="text-sm text-gray-600 dark:text-gray-400">Total Pages</div>
+                        </div>
+                        <div className="bg-white dark:bg-gray-800 p-4 rounded-lg text-center">
+                            <div className="text-3xl font-bold text-green-600">{stats.newPages}</div>
+                            <div className="text-sm text-gray-600 dark:text-gray-400">New Pages</div>
+                        </div>
+                        <div className="bg-white dark:bg-gray-800 p-4 rounded-lg text-center">
+                            <div className="text-3xl font-bold text-orange-600">{stats.updatedPages}</div>
+                            <div className="text-sm text-gray-600 dark:text-gray-400">Updated Pages</div>
+                        </div>
                     </div>
-
-                    {/* Announcements */}
-                    {classifiedData.announcements.length > 0 && (
-                        <div className="bg-white dark:bg-gray-800 p-5 rounded-lg shadow border-l-4 border-blue-500">
-                            <h5 className="font-bold text-blue-600 dark:text-blue-400 mb-3 flex items-center gap-2">
-                                📢 General Announcements ({classifiedData.announcements.length})
-                            </h5>
-                            <div className="space-y-2 max-h-64 overflow-y-auto">
-                                {classifiedData.announcements.map((item, index) => (
-                                    <div key={index} className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded border border-blue-200 dark:border-blue-800">
-                                        <h6 className="font-semibold text-sm text-gray-800 dark:text-white">{item.title}</h6>
-                                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">{item.content}</p>
-                                        <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">📅 {item.date}</p>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Placements */}
-                    {classifiedData.placements.length > 0 && (
-                        <div className="bg-white dark:bg-gray-800 p-5 rounded-lg shadow border-l-4 border-green-500">
-                            <h5 className="font-bold text-green-600 dark:text-green-400 mb-3 flex items-center gap-2">
-                                💼 Placements & Jobs ({classifiedData.placements.length})
-                            </h5>
-                            <div className="space-y-2 max-h-64 overflow-y-auto">
-                                {classifiedData.placements.map((item, index) => (
-                                    <div key={index} className="p-3 bg-green-50 dark:bg-green-900/20 rounded border border-green-200 dark:border-green-800">
-                                        <h6 className="font-semibold text-sm text-gray-800 dark:text-white">{item.title}</h6>
-                                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">{item.content}</p>
-                                        <p className="text-xs text-green-600 dark:text-green-400 mt-1">📅 {item.date}</p>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Events */}
-                    {classifiedData.events.length > 0 && (
-                        <div className="bg-white dark:bg-gray-800 p-5 rounded-lg shadow border-l-4 border-orange-500">
-                            <h5 className="font-bold text-orange-600 dark:text-orange-400 mb-3 flex items-center gap-2">
-                                🎉 Events & Activities ({classifiedData.events.length})
-                            </h5>
-                            <div className="space-y-2 max-h-64 overflow-y-auto">
-                                {classifiedData.events.map((item, index) => (
-                                    <div key={index} className="p-3 bg-orange-50 dark:bg-orange-900/20 rounded border border-orange-200 dark:border-orange-800">
-                                        <h6 className="font-semibold text-sm text-gray-800 dark:text-white">{item.title}</h6>
-                                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">{item.content}</p>
-                                        <p className="text-xs text-orange-600 dark:text-orange-400 mt-1">📅 {item.date}</p>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Examinations */}
-                    {classifiedData.examinations.length > 0 && (
-                        <div className="bg-white dark:bg-gray-800 p-5 rounded-lg shadow border-l-4 border-red-500">
-                            <h5 className="font-bold text-red-600 dark:text-red-400 mb-3 flex items-center gap-2">
-                                📝 Examinations & Tests ({classifiedData.examinations.length})
-                            </h5>
-                            <div className="space-y-2 max-h-64 overflow-y-auto">
-                                {classifiedData.examinations.map((item, index) => (
-                                    <div key={index} className="p-3 bg-red-50 dark:bg-red-900/20 rounded border border-red-200 dark:border-red-800">
-                                        <h6 className="font-semibold text-sm text-gray-800 dark:text-white">{item.title}</h6>
-                                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">{item.content}</p>
-                                        <p className="text-xs text-red-600 dark:text-red-400 mt-1">📅 {item.date}</p>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Holidays */}
-                    {classifiedData.holidays.length > 0 && (
-                        <div className="bg-white dark:bg-gray-800 p-5 rounded-lg shadow border-l-4 border-pink-500">
-                            <h5 className="font-bold text-pink-600 dark:text-pink-400 mb-3 flex items-center gap-2">
-                                🏖️ Holidays & Breaks ({classifiedData.holidays.length})
-                            </h5>
-                            <div className="space-y-2 max-h-64 overflow-y-auto">
-                                {classifiedData.holidays.map((item, index) => (
-                                    <div key={index} className="p-3 bg-pink-50 dark:bg-pink-900/20 rounded border border-pink-200 dark:border-pink-800">
-                                        <h6 className="font-semibold text-sm text-gray-800 dark:text-white">{item.title}</h6>
-                                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">{item.content}</p>
-                                        <p className="text-xs text-pink-600 dark:text-pink-400 mt-1">📅 {item.date}</p>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Documents */}
-                    {classifiedData.documents.length > 0 && (
-                        <div className="bg-white dark:bg-gray-800 p-5 rounded-lg shadow border-l-4 border-purple-500">
-                            <h5 className="font-bold text-purple-600 dark:text-purple-400 mb-3 flex items-center gap-2">
-                                � Documents & Forms ({classifiedData.documents.length})
-                            </h5>
-                            <div className="space-y-2 max-h-64 overflow-y-auto">
-                                {classifiedData.documents.map((item, index) => (
-                                    <div key={index} className="p-3 bg-purple-50 dark:bg-purple-900/20 rounded border border-purple-200 dark:border-purple-800">
-                                        <h6 className="font-semibold text-sm text-gray-800 dark:text-white">{item.title}</h6>
-                                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">{item.content}</p>
-                                        <p className="text-xs text-purple-600 dark:text-purple-400 mt-1">📅 {item.date}</p>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {classifiedData.announcements.length === 0 && 
-                     classifiedData.placements.length === 0 && 
-                     classifiedData.events.length === 0 && 
-                     classifiedData.examinations.length === 0 && 
-                     classifiedData.holidays.length === 0 && 
-                     classifiedData.documents.length === 0 && (
-                        <div className="bg-yellow-50 dark:bg-yellow-900/20 p-6 rounded-lg border-2 border-yellow-200 dark:border-yellow-800 text-center">
-                            <p className="text-yellow-700 dark:text-yellow-400 font-semibold">
-                                ⚠️ No current academic year data found. All items were filtered out as old.
-                            </p>
-                        </div>
-                    )}
                 </div>
             )}
 
-            {/* Scraped Results (fallback) */}
-            {scrapedData.length > 0 && !classifiedData && (
-                <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow border border-gray-200 dark:border-gray-700">
-                    <h4 className="font-semibold text-gray-800 dark:text-white mb-4">
-                        📋 Found {scrapedData.length} Items
+            {/* Scraped Pages */}
+            {scrapedPages.length > 0 && (
+                <div className="space-y-4">
+                    <h4 className="text-lg font-bold text-gray-800 dark:text-white">
+                        📚 Scraped Pages ({scrapedPages.length})
                     </h4>
-                    <div className="space-y-3 max-h-96 overflow-y-auto">
-                        {scrapedData.map((item, index) => (
-                            <div key={index} className="p-4 bg-gray-50 dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-700">
-                                <h5 className="font-semibold text-gray-800 dark:text-white">{item.title}</h5>
-                                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{item.content}</p>
-                                <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">📅 {item.date}</p>
+                    <div className="space-y-3 max-h-[600px] overflow-y-auto">
+                        {scrapedPages.map((page, index) => (
+                            <div key={index} className="bg-white dark:bg-gray-800 p-5 rounded-lg shadow border border-gray-200 dark:border-gray-700">
+                                <div className="flex justify-between items-start mb-3">
+                                    <div>
+                                        <h5 className="font-bold text-gray-800 dark:text-white text-lg">{page.pageTitle}</h5>
+                                        <a href={page.url} target="_blank" rel="noopener noreferrer" 
+                                           className="text-sm text-blue-600 dark:text-blue-400 hover:underline break-all">
+                                            {page.url}
+                                        </a>
+                                    </div>
+                                    <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2 py-1 rounded">
+                                        Level {page.depth}
+                                    </span>
+                                </div>
+                                
+                                {page.metaDescription && (
+                                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-3 italic">
+                                        {page.metaDescription}
+                                    </p>
+                                )}
+
+                                <div className="grid grid-cols-3 gap-2 text-xs text-gray-600 dark:text-gray-400">
+                                    <div className="bg-gray-50 dark:bg-gray-900 p-2 rounded">
+                                        <span className="font-semibold">📝 Sections:</span> {page.sections.length}
+                                    </div>
+                                    <div className="bg-gray-50 dark:bg-gray-900 p-2 rounded">
+                                        <span className="font-semibold">📊 Tables:</span> {page.tables.length}
+                                    </div>
+                                    <div className="bg-gray-50 dark:bg-gray-900 p-2 rounded">
+                                        <span className="font-semibold">🔗 Links:</span> {page.links.length}
+                                    </div>
+                                </div>
+
+                                {(page.contactInfo.emails.length > 0 || page.contactInfo.phones.length > 0) && (
+                                    <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded">
+                                        <div className="text-xs font-semibold text-blue-800 dark:text-blue-200 mb-1">📞 Contact Info Found:</div>
+                                        {page.contactInfo.emails.length > 0 && (
+                                            <div className="text-xs text-gray-700 dark:text-gray-300">
+                                                Emails: {page.contactInfo.emails.join(', ')}
+                                            </div>
+                                        )}
+                                        {page.contactInfo.phones.length > 0 && (
+                                            <div className="text-xs text-gray-700 dark:text-gray-300">
+                                                Phones: {page.contactInfo.phones.join(', ')}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {page.sections.length > 0 && (
+                                    <details className="mt-3">
+                                        <summary className="cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400 hover:underline">
+                                            View Content Sections ({page.sections.length})
+                                        </summary>
+                                        <div className="mt-2 space-y-2 max-h-64 overflow-y-auto">
+                                            {page.sections.slice(0, 5).map((section, idx) => (
+                                                <div key={idx} className="p-2 bg-gray-50 dark:bg-gray-900 rounded text-xs">
+                                                    <div className="font-semibold text-gray-800 dark:text-white">
+                                                        {section.heading}
+                                                    </div>
+                                                    <div className="text-gray-600 dark:text-gray-400 line-clamp-2">
+                                                        {section.content.substring(0, 200)}...
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </details>
+                                )}
                             </div>
                         ))}
                     </div>
@@ -433,7 +356,7 @@ const WebScrapingView: React.FC<WebScrapingViewProps> = ({ onBack }) => {
             <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow border border-gray-200 dark:border-gray-700 space-y-4">
                 <h4 className="font-semibold text-gray-800 dark:text-white">🤖 Automated Scraping</h4>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Set up automatic scraping to fetch announcements from your college website periodically.
+                    Set up automatic scraping to keep your knowledge base updated with the latest information from your college website.
                 </p>
                 
                 <div className="flex items-center gap-4">
@@ -454,18 +377,18 @@ const WebScrapingView: React.FC<WebScrapingViewProps> = ({ onBack }) => {
                     </label>
                     <input
                         type="text"
-                        value={config.schedule || '0 */6 * * *'}
+                        value={config.schedule || '0 0 * * 0'}
                         onChange={(e) => setConfig({...config, schedule: e.target.value})}
-                        placeholder="0 */6 * * *"
+                        placeholder="0 0 * * 0"
                         className="w-full p-2 border border-gray-300 rounded-md dark:bg-gray-700 dark:border-gray-600"
                     />
-                    <p className="text-xs text-gray-500 mt-1">Default: Every 6 hours (0 */6 * * *)</p>
+                    <p className="text-xs text-gray-500 mt-1">Default: Every Sunday at midnight (0 0 * * 0)</p>
                 </div>
                 
                 <button
                     onClick={handleSaveConfig}
                     disabled={isSaving || !url.trim()}
-                    className="px-6 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:bg-gray-400 flex items-center gap-2"
+                    className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 flex items-center gap-2"
                 >
                     {isSaving ? <Spinner className="w-4 h-4" /> : '💾'} Save Configuration
                 </button>

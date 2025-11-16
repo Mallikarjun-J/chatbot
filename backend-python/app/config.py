@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     
     # AI
     GEMINI_API_KEY: str
+    OPENAI_API_KEY: Optional[str] = None
     
     # Email Configuration
     SMTP_HOST: str = "smtp.gmail.com"  # Default to Gmail
