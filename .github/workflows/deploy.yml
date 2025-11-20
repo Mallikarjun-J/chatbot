@@ -1,0 +1,57 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build Frontend
+        working-directory: ./frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install Backend Dependencies
+        working-directory: ./backend-python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create deployment package
+        run: |
+          mkdir -p deploy
+          cp -r frontend/dist deploy/frontend
+          cp -r backend-python deploy/backend
+          echo "Deployment package created"
+
+      - name: Upload deployment artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-package
+          path: deploy/
+          retention-days: 30
+
+      # Add your deployment steps here (e.g., AWS, Azure, Docker, etc.)
+      - name: Deploy notification
+        run: |
+          echo "✅ Build successful! Ready for deployment"
+          echo "📦 Artifacts uploaded"
