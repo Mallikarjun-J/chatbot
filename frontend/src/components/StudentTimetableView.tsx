@@ -35,7 +35,7 @@ const StudentTimetableView: React.FC = () => {
     if (daysOfWeek.includes(today)) {
       setSelectedDay(today);
     } else {
-      setSelectedDay('Monday'); // Default to Monday if it's Sunday
+      setSelectedDay('Monday');
     }
 
     fetchMyTimetable();
@@ -170,7 +170,7 @@ const StudentTimetableView: React.FC = () => {
       </div>
 
       {/* Day Selector */}
-      <div className="flex gap-2 overflow-x-auto pb-2">
+      <div className="flex gap-2 overflow-x-auto pb-2 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-gray-200 dark:[&::-webkit-scrollbar-track]:bg-gray-800 [&::-webkit-scrollbar-thumb]:bg-black dark:[&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-thumb]:rounded-full">
         {daysOfWeek.map((day) => {
           const hasClasses = timetable.days[day] && timetable.days[day].length > 0;
           const isToday = day === new Date().toLocaleDateString('en-US', { weekday: 'long' });

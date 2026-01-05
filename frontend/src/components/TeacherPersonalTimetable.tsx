@@ -91,8 +91,9 @@ const TeacherPersonalTimetable: React.FC<TeacherPersonalTimetableProps> = ({ onB
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [viewingTimetable, setViewingTimetable] = useState<TeacherTimetable | null>(null);
     
-    // Form state for new timetable
+    // Form state for new/edit timetable
     const [showCreateForm, setShowCreateForm] = useState(false);
+    const [editingTimetableId, setEditingTimetableId] = useState<string | null>(null);
     const [timetableName, setTimetableName] = useState('');
     const [schedule, setSchedule] = useState<DaySchedule>({});
     const [editingSlot, setEditingSlot] = useState<{ day: string; time: string } | null>(null);
@@ -266,6 +267,7 @@ const TeacherPersonalTimetable: React.FC<TeacherPersonalTimetableProps> = ({ onB
 
     const resetForm = () => {
         setShowCreateForm(false);
+        setEditingTimetableId(null);
         setTimetableName('');
         setSchedule({});
         setEditingSlot(null);
@@ -296,6 +298,53 @@ const TeacherPersonalTimetable: React.FC<TeacherPersonalTimetableProps> = ({ onB
         } catch (error) {
             console.error('Error deleting timetable:', error);
             setErrorMessage('Failed to delete schedule');
+            setTimeout(() => setErrorMessage(null), 3000);
+        }
+    };
+
+    // Edit timetable
+    const handleEdit = (timetable: TeacherTimetable) => {
+        setEditingTimetableId(timetable.id);
+        setTimetableName(timetable.branch || '');
+        setSchedule(timetable.days);
+        setShowCreateForm(true);
+        setViewingTimetable(null);
+    };
+
+    // Update timetable
+    const handleUpdateTimetable = async () => {
+        if (!editingTimetableId || !timetableName || Object.keys(schedule).length === 0) {
+            setErrorMessage('Please enter a timetable name and add at least one time slot');
+            setTimeout(() => setErrorMessage(null), 3000);
+            return;
+        }
+
+        try {
+            const response = await fetch(`http://localhost:3001/api/timetables/teacher/${editingTimetableId}`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    branch: timetableName,
+                    days: schedule
+                })
+            });
+
+            if (response.ok) {
+                setSuccessMessage('Teaching schedule updated successfully!');
+                setTimeout(() => setSuccessMessage(null), 3000);
+                fetchMyTimetables();
+                resetForm();
+            } else {
+                const error = await response.json();
+                setErrorMessage(error.detail || 'Failed to update timetable');
+                setTimeout(() => setErrorMessage(null), 3000);
+            }
+        } catch (error) {
+            console.error('Error updating timetable:', error);
+            setErrorMessage('Failed to update timetable');
             setTimeout(() => setErrorMessage(null), 3000);
         }
     };
@@ -582,10 +631,10 @@ const TeacherPersonalTimetable: React.FC<TeacherPersonalTimetableProps> = ({ onB
                                 Cancel
                             </button>
                             <button
-                                onClick={handleCreateTimetable}
+                                onClick={editingTimetableId ? handleUpdateTimetable : handleCreateTimetable}
                                 className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold"
                             >
-                                Create Schedule
+                                {editingTimetableId ? 'Update Schedule' : 'Create Schedule'}
                             </button>
                         </div>
                     </div>
@@ -716,15 +765,26 @@ const TeacherPersonalTimetable: React.FC<TeacherPersonalTimetableProps> = ({ onB
                                                 Personal Teaching Schedule
                                             </div>
                                         </div>
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleDelete(timetable.id);
-                                            }}
-                                            className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 text-sm"
-                                        >
-                                            Delete
-                                        </button>
+                                        <div className="flex space-x-2">
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleEdit(timetable);
+                                                }}
+                                                className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 text-sm"
+                                            >
+                                                Edit
+                                            </button>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleDelete(timetable.id);
+                                                }}
+                                                className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 text-sm"
+                                            >
+                                                Delete
+                                            </button>
+                                        </div>
                                     </div>
 
                                     <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">

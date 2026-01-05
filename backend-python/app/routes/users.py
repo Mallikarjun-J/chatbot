@@ -29,6 +29,9 @@ class UserCreate(BaseModel):
 
 class UserUpdate(BaseModel):
     role: str = Field(..., pattern="^(Admin|Teacher|Student)$")
+    branch: Optional[str] = None
+    section: Optional[str] = None
+    semester: Optional[str] = None
 
 @router.get("/api/users")
 async def get_users(current_user: dict = Depends(get_current_user)):
@@ -102,7 +105,7 @@ async def create_user(user_data: UserCreate, current_user: dict = Depends(get_cu
 
 @router.put("/api/users/{user_id}")
 async def update_user_role(user_id: str, user_update: UserUpdate, current_user: dict = Depends(get_current_user)):
-    """Update user role (admin only)"""
+    """Update user details (admin only)"""
     if current_user.get("role") != "Admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     
@@ -113,15 +116,26 @@ async def update_user_role(user_id: str, user_update: UserUpdate, current_user: 
     except:
         raise HTTPException(status_code=400, detail="Invalid user ID")
     
+    # Build update document
+    update_data = {"role": user_update.role}
+    
+    # Add optional fields if provided
+    if user_update.branch is not None:
+        update_data["branch"] = user_update.branch
+    if user_update.section is not None:
+        update_data["section"] = user_update.section
+    if user_update.semester is not None:
+        update_data["semester"] = user_update.semester
+    
     result = await db.users.update_one(
         {"_id": object_id},
-        {"$set": {"role": user_update.role}}
+        {"$set": update_data}
     )
     
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
     
-    return {"message": "User role updated successfully"}
+    return {"message": "User updated successfully"}
 
 @router.delete("/api/users/{user_id}")
 async def delete_user(user_id: str, current_user: dict = Depends(get_current_user)):

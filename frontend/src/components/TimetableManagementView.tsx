@@ -51,8 +51,9 @@ const TimetableManagementView: React.FC<TimetableManagementViewProps> = ({ onBac
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [viewingTimetable, setViewingTimetable] = useState<Timetable | null>(null);
     
-    // Form state for new timetable
+    // Form state for new/edit timetable
     const [showCreateForm, setShowCreateForm] = useState(false);
+    const [editingTimetableId, setEditingTimetableId] = useState<string | null>(null);
     const [branch, setBranch] = useState('');
     const [section, setSection] = useState('');
     const [semester, setSemester] = useState('1');
@@ -78,6 +79,10 @@ const TimetableManagementView: React.FC<TimetableManagementViewProps> = ({ onBac
 
             if (response.ok) {
                 const data = await response.json();
+                console.log('📚 Fetched timetables:', data);
+                if (data.length > 0) {
+                    console.log('📚 First timetable structure:', Object.keys(data[0]));
+                }
                 setTimetables(data);
             }
         } catch (error) {
@@ -90,6 +95,26 @@ const TimetableManagementView: React.FC<TimetableManagementViewProps> = ({ onBac
     useEffect(() => {
         fetchTimetables();
     }, []);
+
+    // Extract time slots from schedule when editing existing timetable
+    useEffect(() => {
+        if (editingTimetableId && schedule && Object.keys(schedule).length > 0) {
+            const allTimes = new Set<string>();
+            Object.values(schedule).forEach(daySlots => {
+                daySlots.forEach(slot => {
+                    if (slot.time) {
+                        allTimes.add(slot.time);
+                    }
+                });
+            });
+            
+            if (allTimes.size > 0) {
+                const sortedTimes = Array.from(allTimes).sort();
+                setTimeSlots(sortedTimes);
+                console.log('📝 Extracted time slots:', sortedTimes);
+            }
+        }
+    }, [editingTimetableId, schedule]);
 
     // Add time slot to schedule
     const addTimeSlot = (day: string, time: string) => {
@@ -235,6 +260,7 @@ const TimetableManagementView: React.FC<TimetableManagementViewProps> = ({ onBac
         setEditingSlot(null);
         setCustomTime('');
         setTimeSlots([...TIME_SLOTS]);
+        setEditingTimetableId(null);
     };
 
     // Delete timetable
@@ -254,6 +280,61 @@ const TimetableManagementView: React.FC<TimetableManagementViewProps> = ({ onBac
             }
         } catch (error) {
             console.error('Error deleting timetable:', error);
+        }
+    };
+
+    // Edit timetable
+    const handleEdit = (timetable: Timetable) => {
+        console.log('📝 Editing timetable:', timetable);
+        console.log('📝 Days data:', timetable.days);
+        console.log('📝 Monday slots:', timetable.days?.Monday);
+        setEditingTimetableId(timetable.id);
+        setBranch(timetable.branch);
+        setSection(timetable.section);
+        setSemester(timetable.semester);
+        setSchedule(timetable.days || {});
+        console.log('📝 Schedule state after setting:', schedule);
+        setShowCreateForm(true);
+        setViewingTimetable(null);
+    };
+
+    // Update timetable
+    const handleUpdateTimetable = async () => {
+        if (!editingTimetableId || !branch || !section || !semester || Object.keys(schedule).length === 0) {
+            setErrorMessage('Please fill all required fields and add at least one class');
+            setTimeout(() => setErrorMessage(null), 3000);
+            return;
+        }
+
+        try {
+            const response = await fetch(`http://localhost:3001/api/timetables/class/${editingTimetableId}`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    branch,
+                    section,
+                    semester,
+                    days: schedule
+                })
+            });
+
+            if (response.ok) {
+                setSuccessMessage('Timetable updated successfully!');
+                setTimeout(() => setSuccessMessage(null), 3000);
+                fetchTimetables();
+                resetForm();
+            } else {
+                const error = await response.json();
+                setErrorMessage(error.detail || 'Failed to update timetable');
+                setTimeout(() => setErrorMessage(null), 3000);
+            }
+        } catch (error) {
+            console.error('Error updating timetable:', error);
+            setErrorMessage('Failed to update timetable');
+            setTimeout(() => setErrorMessage(null), 3000);
         }
     };
 
@@ -565,10 +646,10 @@ const TimetableManagementView: React.FC<TimetableManagementViewProps> = ({ onBac
                                 Cancel
                             </button>
                             <button
-                                onClick={handleCreateTimetable}
+                                onClick={editingTimetableId ? handleUpdateTimetable : handleCreateTimetable}
                                 className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold"
                             >
-                                Create Timetable
+                                {editingTimetableId ? 'Update Timetable' : 'Create Timetable'}
                             </button>
                         </div>
                     </div>
@@ -709,6 +790,12 @@ const TimetableManagementView: React.FC<TimetableManagementViewProps> = ({ onBac
                                                 className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 text-sm font-medium"
                                             >
                                                 View
+                                            </button>
+                                            <button
+                                                onClick={() => handleEdit(timetable)}
+                                                className="text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300 text-sm font-medium"
+                                            >
+                                                Edit
                                             </button>
                                             <button
                                                 onClick={() => handleDelete(timetable.id)}

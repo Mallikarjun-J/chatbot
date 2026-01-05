@@ -16,6 +16,7 @@ import re
 from ..database import get_database
 from .auth import get_current_user
 from ..config import settings
+from ..services.email_service import email_service
 
 # Configure Tesseract path for Windows
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
@@ -467,6 +468,145 @@ async def delete_timetable(
         raise HTTPException(status_code=404, detail="Timetable not found")
     
     return {"message": "Timetable deleted successfully"}
+
+
+@router.put("/api/timetables/class/{timetable_id}")
+async def update_timetable(
+    timetable_id: str,
+    timetable_data: ManualTimetableCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    """Update student class timetable (admin only)"""
+    if current_user.get("role") != "Admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    db = get_database()
+    
+    try:
+        object_id = ObjectId(timetable_id)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid timetable ID")
+    
+    # Check if timetable exists
+    existing = await db.student_timetables.find_one({"_id": object_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Timetable not found")
+    
+    # Convert Pydantic models to dicts for MongoDB
+    days_dict = {}
+    for day, slots in timetable_data.days.items():
+        days_dict[day] = [slot.dict() for slot in slots]
+    
+    # Prepare update document
+    update_doc = {
+        "branch": timetable_data.branch,
+        "section": timetable_data.section,
+        "semester": timetable_data.semester,
+        "days": days_dict,
+        "updatedBy": current_user.get("userId"),
+        "updatedAt": datetime.utcnow()
+    }
+    
+    # Update in database
+    result = await db.student_timetables.update_one(
+        {"_id": object_id},
+        {"$set": update_doc}
+    )
+    
+    if result.modified_count == 0 and result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Timetable not found")
+    
+    # Send notification to affected students
+    if result.modified_count > 0:
+        try:
+            # Create announcement
+            announcement_doc = {
+                "title": f"Timetable Updated - {timetable_data.branch} Sem {timetable_data.semester} Section {timetable_data.section}",
+                "content": f"Your class timetable has been updated by the administrator. Please check the updated schedule in your dashboard.",
+                "targetRole": "Students",
+                "branch": timetable_data.branch,
+                "semester": int(timetable_data.semester),
+                "date": datetime.utcnow(),
+                "createdBy": current_user.get("name", "Admin"),
+                "priority": "high"
+            }
+            await db.announcements.insert_one(announcement_doc)
+            
+            # Send emails to affected students
+            students = await db.users.find({
+                "role": "Student",
+                "branch": timetable_data.branch,
+                "semester": str(timetable_data.semester),
+                "section": timetable_data.section
+            }).to_list(length=1000)
+            
+            if students:
+                subject = f"Timetable Update - Semester {timetable_data.semester} Section {timetable_data.section}"
+                
+                for student in students:
+                    student_email = student.get("email")
+                    student_name = student.get("name", "Student")
+                    
+                    if student_email:
+                        html_content = f"""
+                        <html>
+                            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                                <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                                    <h2 style="color: #2563eb;">Timetable Updated</h2>
+                                    <p>Dear {student_name},</p>
+                                    <p>Your class timetable has been updated by the administrator.</p>
+                                    <div style="background-color: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                                        <p style="margin: 5px 0;"><strong>Branch:</strong> {timetable_data.branch}</p>
+                                        <p style="margin: 5px 0;"><strong>Semester:</strong> {timetable_data.semester}</p>
+                                        <p style="margin: 5px 0;"><strong>Section:</strong> {timetable_data.section}</p>
+                                    </div>
+                                    <p>Please log in to your dashboard to view the updated schedule.</p>
+                                    <p style="margin-top: 30px; color: #666; font-size: 12px;">
+                                        This is an automated notification from CampusAura.
+                                    </p>
+                                </div>
+                            </body>
+                        </html>
+                        """
+                        
+                        text_content = f"""
+                        Timetable Updated
+                        
+                        Dear {student_name},
+                        
+                        Your class timetable has been updated by the administrator.
+                        
+                        Branch: {timetable_data.branch}
+                        Semester: {timetable_data.semester}
+                        Section: {timetable_data.section}
+                        
+                        Please log in to your dashboard to view the updated schedule.
+                        
+                        This is an automated notification from CampusAura.
+                        """
+                        
+                        # Send email asynchronously (don't wait for result)
+                        try:
+                            await email_service.send_email(
+                                to_email=student_email,
+                                subject=subject,
+                                html_content=html_content,
+                                text_content=text_content
+                            )
+                        except Exception as email_error:
+                            print(f"Failed to send email to {student_email}: {email_error}")
+                            
+        except Exception as e:
+            # Log error but don't fail the update
+            print(f"Failed to create notification or send emails: {e}")
+    
+    return {
+        "message": f"Timetable updated successfully for {timetable_data.branch} - Semester {timetable_data.semester}, Section {timetable_data.section}",
+        "id": timetable_id,
+        "branch": timetable_data.branch,
+        "section": timetable_data.section,
+        "semester": timetable_data.semester
+    }
 
 
 @router.get("/api/timetables/teacher/my-timetable")

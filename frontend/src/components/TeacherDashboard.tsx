@@ -227,7 +227,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, announcements
             );
         }
         if (announcements.length > 0) {
-            return <AnnouncementsTicker announcements={announcements} />;
+            return <AnnouncementsTicker announcements={announcements.slice(0, 3)} />;
         }
         return null;
     };

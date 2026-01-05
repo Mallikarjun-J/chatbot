@@ -39,7 +39,6 @@ class Database:
         self.documents = None
         self.student_timetables = None
         self.teachers_timetable = None
-        self.teacher_classes = None
         self.knowledge_base = None
         self.ml_training_data = None
         self.scrape_config = None
@@ -63,9 +62,8 @@ class Database:
             self.holidays = self.db.holidays
             self.documents = self.db.documents
             self.student_timetables = self.db.studentTimetables
-            self.teachers_timetable = self.db.teachersTimetable
-            self.teacher_classes = self.db.teacherClasses
-            self.knowledge_base = self.db.knowledgeBase
+            self.teachers_timetable = self.db.teachers_timetable
+            self.knowledge_base = self.db.knowledge_base
             self.ml_training_data = self.db.mlTrainingData
             self.scrape_config = self.db.scrapeConfig
             
@@ -156,13 +154,13 @@ async def create_indexes():
         await db.classTimetables.create_index("semester")
         
         # Teacher timetables
-        await db.teacherTimetables.create_index("teacherId")
-        await db.teacherTimetables.create_index("teacherName")
+        await db.teachers_timetable.create_index("teacherId")
+        await db.teachers_timetable.create_index("teacherName")
         
         # Knowledge base with text search
-        await db.knowledgeBase.create_index([("title", "text"), ("content", "text")])
-        await db.knowledgeBase.create_index("category")
-        await db.knowledgeBase.create_index([("createdAt", -1)])
+        await db.knowledge_base.create_index([("title", "text"), ("content", "text")])
+        await db.knowledge_base.create_index("category")
+        await db.knowledge_base.create_index([("createdAt", -1)])
         
         # ML training data
         await db.mlTrainingData.create_index("category")
@@ -413,7 +411,7 @@ async def get_recent_placements(limit: int = 10) -> List[Dict[str, Any]]:
 
 async def search_knowledge_base(query: str, limit: int = 10) -> List[Dict[str, Any]]:
     """Full-text search in knowledge base"""
-    cursor = db.knowledgeBase.find(
+    cursor = db.knowledge_base.find(
         {"$text": {"$search": query}},
         {"score": {"$meta": "textScore"}}
     ).sort([("score", {"$meta": "textScore"})]).limit(limit)
@@ -442,7 +440,7 @@ async def get_timetable_by_teacher(teacher_id: str) -> Optional[Dict[str, Any]]:
     if not is_valid_objectid(teacher_id):
         return None
     
-    timetable = await db.teacherTimetables.find_one({"teacherId": ObjectId(teacher_id)})
+    timetable = await db.teachers_timetable.find_one({"teacherId": ObjectId(teacher_id)})
     return map_document(timetable) if timetable else None
 
 

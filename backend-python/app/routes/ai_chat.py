@@ -10,6 +10,7 @@ from loguru import logger
 
 from app.middleware.auth import get_current_user
 from app.ml.hybrid_chatbot import HybridChatbot
+from app.utils import map_documents
 
 
 router = APIRouter()
@@ -46,6 +47,8 @@ async def chat_with_ai(
     - ML embeddings for semantic search
     - Trained classifier for content understanding
     - Google Gemini for natural language generation
+    
+    Admin users get full access to all users' data and information.
     """
     try:
         # Get ML services from app state
@@ -55,12 +58,73 @@ async def chat_with_ai(
         # Create hybrid chatbot
         chatbot = HybridChatbot(embeddings=embeddings, classifier=classifier)
         
+        # Fetch user data if logged in
+        user_data = None
+        user_name = None
+        user_role = None
+        
+        if current_user:
+            user_role = current_user["role"]
+            user_name = current_user.get("name", "User")
+            
+            # Admin gets access to ALL data (no restrictions)
+            if user_role == "Admin":
+                try:
+                    from app.database import db
+                    
+                    # Get all users data for admin
+                    all_users = await db.users.find({}).to_list(length=None)
+                    all_attendance = await db.attendance.find({}).to_list(length=None)
+                    all_cgpa = await db.cgpa.find({}).to_list(length=None)
+                    all_timetables = await db.timetables.find({}).to_list(length=None)
+                    
+                    # Convert MongoDB ObjectIds to strings
+                    all_users = map_documents(all_users)
+                    all_attendance = map_documents(all_attendance)
+                    all_cgpa = map_documents(all_cgpa)
+                    all_timetables = map_documents(all_timetables)
+                    
+                    logger.info(f"✅ Admin data fetched: {len(all_users)} users, {len(all_attendance)} attendance records")
+                    
+                    user_data = {
+                        "role": "Admin",
+                        "name": user_name,
+                        "userId": current_user["userId"],
+                        "allUsers": all_users,
+                        "allAttendance": all_attendance,
+                        "allCGPA": all_cgpa,
+                        "allTimetables": all_timetables,
+                        "hasFullAccess": True
+                    }
+                except Exception as e:
+                    logger.error(f"❌ Could not fetch admin data: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # Fetch attendance data for students
+            elif user_role == "Student":
+                try:
+                    from app.database import db
+                    attendance_records = await db.attendance.find(
+                        {"userId": current_user["userId"]}
+                    ).to_list(length=None)
+                    
+                    user_data = {
+                        "attendance": attendance_records,
+                        "userId": current_user["userId"],
+                        "name": user_name,
+                        "role": user_role
+                    }
+                except Exception as e:
+                    logger.warning(f"Could not fetch attendance data: {e}")
+        
         # Generate response
-        user_role = current_user["role"] if current_user else None
         result = await chatbot.generate_response(
             message=request_data.message,
             category=request_data.category,
-            user_role=user_role
+            user_role=user_role,
+            user_name=user_name,
+            user_data=user_data
         )
         
         return result

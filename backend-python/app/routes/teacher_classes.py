@@ -47,7 +47,7 @@ async def create_teacher_class(
     }
     
     # Check if this class already exists for this teacher
-    existing = await db.teacher_classes.find_one({
+    existing = await db.teachers_timetable.find_one({
         "teacherId": current_user.get("userId"),
         "subject": class_data.subject,
         "department": class_data.department,
@@ -58,7 +58,7 @@ async def create_teacher_class(
     if existing:
         raise HTTPException(status_code=400, detail="This class is already in your list")
     
-    result = await db.teacher_classes.insert_one(class_doc)
+    result = await db.teachers_timetable.insert_one(class_doc)
     class_id = str(result.inserted_id)
     
     return {
@@ -75,7 +75,7 @@ async def get_teacher_classes(current_user: dict = Depends(get_current_user)):
     
     db = get_database()
     
-    classes = await db.teacher_classes.find({
+    classes = await db.teachers_timetable.find({
         "teacherId": current_user.get("userId")
     }).sort("subject", 1).to_list(length=1000)
     
@@ -102,7 +102,7 @@ async def update_teacher_class(
         raise HTTPException(status_code=400, detail="Invalid class ID")
     
     # Verify ownership
-    existing = await db.teacher_classes.find_one({
+    existing = await db.teachers_timetable.find_one({
         "_id": obj_id,
         "teacherId": current_user.get("userId")
     })
@@ -121,7 +121,7 @@ async def update_teacher_class(
     if class_data.section is not None:
         update_doc["section"] = class_data.section
     
-    await db.teacher_classes.update_one(
+    await db.teachers_timetable.update_one(
         {"_id": obj_id},
         {"$set": update_doc}
     )
@@ -145,7 +145,7 @@ async def delete_teacher_class(
         raise HTTPException(status_code=400, detail="Invalid class ID")
     
     # Verify ownership
-    result = await db.teacher_classes.delete_one({
+    result = await db.teachers_timetable.delete_one({
         "_id": obj_id,
         "teacherId": current_user.get("userId")
     })

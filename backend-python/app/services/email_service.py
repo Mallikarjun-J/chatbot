@@ -6,9 +6,12 @@ Handles sending emails via SMTP (Gmail, Outlook, custom servers)
 import aiosmtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 from jinja2 import Template
 from app.config import settings
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +35,9 @@ class EmailService:
         to_email: str, 
         subject: str, 
         html_content: str,
-        text_content: str = None
+        text_content: str = None,
+        attachment_path: str = None,
+        attachment_name: str = None
     ) -> bool:
         """
         Send an email using SMTP
@@ -42,25 +47,54 @@ class EmailService:
             subject: Email subject
             html_content: HTML body of the email
             text_content: Plain text alternative (optional)
+            attachment_path: Path to file to attach (optional)
+            attachment_name: Name for the attachment (optional, defaults to filename)
             
         Returns:
             bool: True if email sent successfully, False otherwise
         """
         try:
             # Create message
-            message = MIMEMultipart("alternative")
+            message = MIMEMultipart("mixed")
             message["From"] = f"{self.from_name} <{self.from_email}>"
             message["To"] = to_email
             message["Subject"] = subject
             
+            # Create alternative part for text/html
+            msg_alternative = MIMEMultipart("alternative")
+            
             # Add plain text version
             if text_content:
                 text_part = MIMEText(text_content, "plain")
-                message.attach(text_part)
+                msg_alternative.attach(text_part)
             
             # Add HTML version
             html_part = MIMEText(html_content, "html")
-            message.attach(html_part)
+            msg_alternative.attach(html_part)
+            
+            message.attach(msg_alternative)
+            
+            # Add attachment if provided
+            if attachment_path and os.path.exists(attachment_path):
+                try:
+                    with open(attachment_path, "rb") as attachment:
+                        part = MIMEBase("application", "octet-stream")
+                        part.set_payload(attachment.read())
+                    
+                    encoders.encode_base64(part)
+                    
+                    # Use provided name or extract from path
+                    filename = attachment_name or os.path.basename(attachment_path)
+                    part.add_header(
+                        "Content-Disposition",
+                        f"attachment; filename= {filename}",
+                    )
+                    
+                    message.attach(part)
+                    logger.info(f"Added attachment: {filename}")
+                except Exception as attach_error:
+                    logger.error(f"Failed to attach file {attachment_path}: {attach_error}")
+                    # Continue without attachment rather than failing entirely
             
             # Send email
             await aiosmtplib.send(
@@ -354,6 +388,207 @@ class EmailService:
         )
         
         return await self.send_email(to_email, subject, html_content, text_content)
+    
+    async def send_announcement_notification(
+        self,
+        to_emails: list[str],
+        announcement_title: str,
+        announcement_content: str,
+        event_date: str = None,
+        event_time: str = None,
+        location: str = None
+    ) -> dict:
+        """
+        Send notification email for new announcement to multiple students
+        
+        Args:
+            to_emails: List of student email addresses
+            announcement_title: Title of the announcement
+            announcement_content: Content of the announcement
+            event_date: Optional event date
+            event_time: Optional event time
+            location: Optional event location
+            
+        Returns:
+            dict: Success count and failed count
+        """
+        if not to_emails:
+            return {"sent": 0, "failed": 0}
+        
+        subject = f"📢 New Announcement: {announcement_title}"
+        
+        # Build event details
+        event_details = ""
+        if event_date or event_time or location:
+            event_details = "<div style='background: #f0f9ff; padding: 15px; border-radius: 8px; margin: 20px 0;'>"
+            event_details += "<h3 style='margin: 0 0 10px 0; color: #0369a1;'>📅 Event Details</h3>"
+            if event_date:
+                event_details += f"<p style='margin: 5px 0;'><strong>Date:</strong> {event_date}</p>"
+            if event_time:
+                event_details += f"<p style='margin: 5px 0;'><strong>Time:</strong> {event_time}</p>"
+            if location:
+                event_details += f"<p style='margin: 5px 0;'><strong>Location:</strong> {location}</p>"
+            event_details += "</div>"
+        
+        html_template = f"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
+                <h1 style="color: white; margin: 0; font-size: 24px;">📢 New Announcement</h1>
+            </div>
+            
+            <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 10px 10px;">
+                <h2 style="color: #1f2937; margin-top: 0;">{announcement_title}</h2>
+                
+                <div style="background: #f9fafb; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <p style="margin: 0; white-space: pre-wrap;">{announcement_content}</p>
+                </div>
+                
+                {event_details}
+                
+                <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; text-align: center;">
+                    <p style="color: #6b7280; font-size: 14px; margin: 5px 0;">
+                        Login to CampusAura for more details
+                    </p>
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin-top: 20px; color: #9ca3af; font-size: 12px;">
+                <p>This is an automated notification from CampusAura</p>
+                <p>BMSIT & M - BMS Institute of Technology and Management</p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        # Send to each email
+        sent_count = 0
+        failed_count = 0
+        
+        for email in to_emails:
+            try:
+                success = await self.send_email(email, subject, html_template)
+                if success:
+                    sent_count += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                logger.error(f"Failed to send announcement email to {email}: {e}")
+                failed_count += 1
+        
+        logger.info(f"📧 Announcement notification sent: {sent_count} successful, {failed_count} failed")
+        return {"sent": sent_count, "failed": failed_count}
+    
+    async def send_document_notification(
+        self,
+        to_emails: list[str],
+        document_name: str,
+        document_type: str,
+        subject_name: str,
+        semester = None,  # Can be int, string "All Semesters", or None
+        branch: str = None,
+        description: str = None,
+        file_path: str = None
+    ) -> dict:
+        """
+        Send notification email for new document upload with document attached
+        
+        Args:
+            to_emails: List of recipient email addresses (students/teachers)
+            document_name: Name of the uploaded document
+            document_type: Type of document (Notes, Syllabus, etc.)
+            subject_name: Subject/course name
+            semester: Optional semester number (for student documents)
+            branch: Optional branch/department name
+            description: Optional document description
+            file_path: Path to the document file to attach
+            
+        Returns:
+            dict: Success count and failed count
+        """
+        if not to_emails:
+            return {"sent": 0, "failed": 0}
+        
+        email_subject = f"📄 New {document_type}: {document_name}"
+        
+        branch_info = f"<p style='margin: 5px 0;'><strong>{'Department' if not semester else 'Branch'}:</strong> {branch}</p>" if branch else ""
+        semester_info = f"<p style='margin: 5px 0;'><strong>Semester:</strong> {semester}</p>" if semester else ""
+        desc_info = f"<div style='background: #f9fafb; padding: 15px; border-radius: 8px; margin: 15px 0;'><p style='margin: 0;'>{description}</p></div>" if description else ""
+        
+        # Show attachment notice if file is attached
+        attachment_notice = ""
+        if file_path and os.path.exists(file_path):
+            attachment_notice = """
+                <div style="background: #dcfce7; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #16a34a;">
+                    <p style="margin: 0; color: #166534;">
+                        <strong>📎 Document Attached</strong><br>
+                        The document file is attached to this email for your convenience.
+                    </p>
+                </div>
+            """
+        
+        html_template = f"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
+                <h1 style="color: white; margin: 0; font-size: 24px;">📄 New Document Uploaded</h1>
+            </div>
+            
+            <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 10px 10px;">
+                <h2 style="color: #1f2937; margin-top: 0;">{document_name}</h2>
+                
+                {attachment_notice}
+                
+                <div style='background: #eff6ff; padding: 15px; border-radius: 8px; margin: 20px 0;'>
+                    <h3 style='margin: 0 0 10px 0; color: #1e40af;'>📋 Document Details</h3>
+                    <p style='margin: 5px 0;'><strong>Type:</strong> {document_type}</p>
+                    <p style='margin: 5px 0;'><strong>Subject:</strong> {subject_name}</p>
+                    {semester_info}
+                    {branch_info}
+                </div>
+                
+                {desc_info}
+                
+                <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; text-align: center;">
+                    <p style="color: #6b7280; font-size: 14px; margin: 5px 0;">
+                        You can also access this document through CampusAura portal
+                    </p>
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin-top: 20px; color: #9ca3af; font-size: 12px;">
+                <p>This is an automated notification from CampusAura</p>
+                <p>BMSIT & M - BMS Institute of Technology and Management</p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        # Send to each email with attachment
+        sent_count = 0
+        failed_count = 0
+        
+        for email in to_emails:
+            try:
+                success = await self.send_email(
+                    to_email=email,
+                    subject=email_subject,
+                    html_content=html_template,
+                    attachment_path=file_path,
+                    attachment_name=document_name
+                )
+                if success:
+                    sent_count += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                logger.error(f"Failed to send document email to {email}: {e}")
+                failed_count += 1
+        
+        logger.info(f"📧 Document notification sent: {sent_count} successful, {failed_count} failed")
+        return {"sent": sent_count, "failed": failed_count}
 
 
 # Create singleton instance

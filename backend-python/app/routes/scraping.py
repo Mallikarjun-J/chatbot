@@ -17,18 +17,22 @@ from ..services.documentExtractor import (
 
 router = APIRouter()
 
-# Keywords for classification
+# Keywords for classification - Enhanced with more granular categories
 CLASSIFICATION_KEYWORDS = {
     'placements': ['placement', 'job', 'recruit', 'career', 'company', 'interview', 'offer', 'salary', 'campus placement', 'package', 'lpa', 'hired', 'training', 'internship', 'recruiter', 'tpo', 'corporate', 'industry', 'employer', 'ctc', 'stipend', 'ppo', 'selection', 'drive'],
-    'events': ['event', 'workshop', 'seminar', 'conference', 'fest', 'competition', 'cultural', 'tech fest', 'symposium'],
-    'examinations': ['exam', 'test', 'assessment', 'evaluation', 'quiz', 'mid-term', 'final', 'internal', 'viva'],
-    'holidays': ['holiday', 'vacation', 'break', 'leave', 'closed', 'off', 'reopen'],
-    'documents': ['form', 'application', 'document', 'certificate', 'download', 'pdf', 'attachment', 'file', 'circular'],
-    'departments': ['department', 'cse', 'ece', 'mechanical', 'civil', 'faculty', 'hod', 'professor', 'staff'],
-    'admissions': ['admission', 'intake', 'eligibility', 'fee', 'scholarship', 'cutoff', 'entrance', 'apply', 'enroll'],
-    'facilities': ['library', 'lab', 'hostel', 'canteen', 'sports', 'infrastructure', 'facility', 'accommodation'],
-    'academics': ['syllabus', 'curriculum', 'course', 'program', 'semester', 'credit', 'regulation', 'autonomous'],
-    'contact': ['contact', 'email', 'phone', 'address', 'location', 'principal', 'office']
+    'events': ['event', 'workshop', 'seminar', 'conference', 'fest', 'competition', 'cultural', 'tech fest', 'symposium', 'celebration', 'function', 'ceremony'],
+    'examinations': ['exam', 'test', 'assessment', 'evaluation', 'quiz', 'mid-term', 'final', 'internal', 'viva', 'external', 'revaluation', 'results', 'marks'],
+    'holidays': ['holiday', 'vacation', 'break', 'leave', 'closed', 'off', 'reopen', 'working day', 'calendar'],
+    'documents': ['form', 'application', 'document', 'certificate', 'download', 'pdf', 'attachment', 'file', 'circular', 'notice', 'notification'],
+    'departments': ['department', 'cse', 'ece', 'mechanical', 'civil', 'faculty', 'hod', 'professor', 'staff', 'electronics', 'computer science', 'information science', 'electrical', 'biotechnology'],
+    'admissions': ['admission', 'intake', 'eligibility', 'fee', 'scholarship', 'cutoff', 'entrance', 'apply', 'enroll', 'kcet', 'comedk', 'management', 'seat'],
+    'facilities': ['library', 'lab', 'hostel', 'canteen', 'sports', 'infrastructure', 'facility', 'accommodation', 'transport', 'bus', 'gymnasium', 'auditorium'],
+    'academics': ['syllabus', 'curriculum', 'course', 'program', 'semester', 'credit', 'regulation', 'autonomous', 'vtu', 'scheme', 'elective', 'cbcs', 'outcome'],
+    'contact': ['contact', 'email', 'phone', 'address', 'location', 'principal', 'office', 'reach', 'visit', 'direction'],
+    'research': ['research', 'publication', 'journal', 'conference', 'phd', 'patent', 'innovation', 'paper', 'scholar', 'thesis'],
+    'clubs': ['club', 'association', 'society', 'chapter', 'community', 'team', 'group', 'ieee', 'csi', 'student body'],
+    'achievements': ['achievement', 'award', 'recognition', 'excellence', 'winner', 'medal', 'prize', 'rank', 'topper'],
+    'timetable': ['timetable', 'schedule', 'timing', 'class', 'period', 'session', 'routine']
 }
 
 # High-priority page patterns (weighted scoring) - PLACEMENTS IS CRITICAL!
@@ -81,7 +85,7 @@ def calculate_page_priority(url: str, title: str) -> int:
     
     return priority
 
-async def scrape_page_content(url: str, visited: Set[str], max_depth: int, current_depth: int = 0) -> List[Dict]:
+async def scrape_page_content(url: str, visited: Set[str], max_depth: int, current_depth: int = 0, days_threshold: int = 365) -> List[Dict]:
     """Recursively scrape a page and its links"""
     from loguru import logger
     
@@ -307,8 +311,14 @@ async def scrape_page_content(url: str, visited: Set[str], max_depth: int, curre
             'depth': current_depth
         }
         
+        # Check if page content is recent (for filtering)
+        full_content_text = ' '.join([s['content'] for s in sections])
+        is_recent, page_date = is_recent_document(full_content_text, title, days_threshold=365)
+        page_data['isRecent'] = is_recent
+        page_data['pageDate'] = page_date.isoformat() if page_date else None
+        
         results.append(page_data)
-        logger.info(f"✓ Scraped: {title} ({len(sections)} sections, {len(tables)} tables, {len(extracted_documents)} docs extracted, priority: {page_priority})")
+        logger.info(f"✓ Scraped: {title} ({len(sections)} sections, {len(tables)} tables, {len(extracted_documents)} docs extracted, priority: {page_priority}, recent: {is_recent})")
         
         # Recursively scrape linked pages with PLACEMENT-FIRST approach
         if current_depth < max_depth - 1:
@@ -330,7 +340,7 @@ async def scrape_page_content(url: str, visited: Set[str], max_depth: int, curre
                 link_url = normalize_url(link_url)  # Normalize before checking visited
                 if link_url not in visited and len(visited) < 250:  # Increased limit for priority pages
                     try:
-                        sub_results = await scrape_page_content(link_url, visited, max_depth, current_depth + 1)
+                        sub_results = await scrape_page_content(link_url, visited, max_depth, current_depth + 1, days_threshold)
                         results.extend(sub_results)
                     except Exception as e:
                         logger.warning(f"Failed to scrape {link_url}: {str(e)}")
@@ -354,40 +364,85 @@ async def scrape_page_content(url: str, visited: Set[str], max_depth: int, curre
         return []
 
 def classify_content(title: str, content: str, url: str) -> Dict[str, any]:
-    """Classify content based on keywords and return detailed classification"""
+    """Enhanced classification with ML-style scoring and multiple categories"""
     text = (title + ' ' + content + ' ' + url).lower()
     
-    # Find all matching categories (a page can belong to multiple)
-    categories = []
-    confidence = {}
+    # Calculate weighted scores for each category
+    category_scores = {}
     
     for category, keywords in CLASSIFICATION_KEYWORDS.items():
-        matches = sum(1 for keyword in keywords if keyword in text)
-        if matches > 0:
-            categories.append(category)
-            confidence[category] = matches
+        # Count keyword matches with position-based weighting
+        score = 0
+        title_lower = title.lower()
+        
+        for keyword in keywords:
+            # Title matches get 3x weight
+            if keyword in title_lower:
+                score += 3
+            # URL matches get 2x weight
+            if keyword in url.lower():
+                score += 2
+            # Content matches get 1x weight
+            if keyword in content.lower():
+                score += 1
+        
+        if score > 0:
+            category_scores[category] = score
     
-    # Primary category is the one with most matches
-    primary_category = max(confidence.items(), key=lambda x: x[1])[0] if confidence else 'general'
+    # Determine primary category (highest score)
+    primary_category = 'general'
+    if category_scores:
+        primary_category = max(category_scores.items(), key=lambda x: x[1])[0]
     
-    # Determine content type from URL and title
+    # Get all relevant categories (score >= 2)
+    relevant_categories = [cat for cat, score in category_scores.items() if score >= 2]
+    
+    # If no relevant categories, use all with score > 0
+    if not relevant_categories:
+        relevant_categories = list(category_scores.keys())
+    
+    # Determine content type with more precision
     content_type = 'page'
-    if 'pdf' in url.lower():
+    if 'pdf' in url.lower() or '.pdf' in url.lower():
         content_type = 'document'
-    elif any(word in title.lower() for word in ['news', 'announcement', 'notice']):
+    elif any(word in title.lower() for word in ['circular', 'notification', 'notice']):
+        content_type = 'circular'
+    elif any(word in title.lower() for word in ['news', 'announcement', 'update']):
         content_type = 'announcement'
-    elif any(word in title.lower() for word in ['event', 'workshop', 'seminar']):
+    elif any(word in title.lower() for word in ['event', 'workshop', 'seminar', 'webinar', 'conference']):
         content_type = 'event'
-    elif any(word in title.lower() for word in ['department', 'faculty', 'staff']):
+    elif any(word in title.lower() for word in ['department', 'faculty', 'staff', 'professor']):
         content_type = 'department'
-    elif any(word in title.lower() for word in ['course', 'program', 'syllabus']):
+    elif any(word in title.lower() for word in ['course', 'program', 'syllabus', 'curriculum', 'scheme']):
         content_type = 'academic'
+    elif any(word in title.lower() for word in ['placement', 'recruit', 'company', 'tpo']):
+        content_type = 'placement'
+    elif any(word in title.lower() for word in ['admission', 'intake', 'apply', 'enroll']):
+        content_type = 'admission'
+    elif any(word in title.lower() for word in ['result', 'marks', 'grade', 'exam']):
+        content_type = 'result'
+    elif any(word in title.lower() for word in ['timetable', 'schedule', 'routine']):
+        content_type = 'timetable'
+    
+    # Calculate confidence as normalized score
+    total_score = sum(category_scores.values())
+    confidence_scores = {cat: round(score / total_score, 3) if total_score > 0 else 0 
+                        for cat, score in category_scores.items()}
+    
+    # Determine importance/priority level
+    importance = 'low'
+    if primary_category in ['placements', 'admissions', 'examinations']:
+        importance = 'high'
+    elif primary_category in ['events', 'academics', 'departments']:
+        importance = 'medium'
     
     return {
         'primary': primary_category,
-        'categories': categories,
+        'categories': relevant_categories,
         'type': content_type,
-        'confidence': confidence
+        'confidence': confidence_scores,
+        'importance': importance,
+        'totalScore': total_score
     }
 
 @router.post("/api/scrape/website")
@@ -404,28 +459,43 @@ async def scrape_entire_website(
     url = request_data.get("url")
     max_depth = request_data.get("maxDepth", 3)  # Default: 3 levels deep
     auto_save = request_data.get("autoSave", True)
+    days_threshold = request_data.get("daysThreshold", 365)  # Default: 1 year
+    only_recent = request_data.get("onlyRecent", True)  # Default: only scrape recent content
     
     if not url:
         raise HTTPException(status_code=400, detail="URL is required")
     
-    logger.info(f"Starting comprehensive scrape of: {url} (max depth: {max_depth})")
+    logger.info(f"Starting comprehensive scrape of: {url} (max depth: {max_depth}, only recent: {only_recent}, days threshold: {days_threshold})")
     
     try:
         visited = set()
-        pages = await scrape_page_content(url, visited, max_depth)
+        pages = await scrape_page_content(url, visited, max_depth, days_threshold=days_threshold)
         
         if not pages:
             raise HTTPException(status_code=404, detail="No content found on the website")
         
+        # Filter for recent content only if requested
+        total_scraped = len(pages)
+        if only_recent:
+            pages = [p for p in pages if p.get('isRecent', True)]
+            logger.info(f"Filtered to {len(pages)} recent pages out of {total_scraped} total pages")
+        
+        if not pages:
+            raise HTTPException(status_code=404, detail=f"No recent content found (scraped {total_scraped} pages, all were older than {days_threshold} days)")
+        
         logger.info(f"Successfully scraped {len(pages)} pages")
         
-        # Save to knowledge base with duplicate detection
+        # Save to knowledge base with enhanced classification and embeddings
         if auto_save:
             db = get_database()
             saved_count = 0
             updated_count = 0
             skipped_duplicates = 0
             docs_extracted = 0
+            
+            # Initialize embedding service for semantic search
+            from app.ml.embeddings import EmbeddingService
+            embedding_service = EmbeddingService()
             
             # Track content hashes to detect duplicate content
             existing_hashes = set()
@@ -437,6 +507,7 @@ async def scrape_entire_website(
             # Group by category for summary
             category_counts = {}
             priority_counts = {'high': 0, 'medium': 0, 'low': 0}
+            importance_counts = {'high': 0, 'medium': 0, 'low': 0}
             
             for page in pages:
                 # Classify the page
@@ -463,6 +534,10 @@ async def scrape_entire_website(
                 primary = classification['primary']
                 category_counts[primary] = category_counts.get(primary, 0) + 1
                 
+                # Track importance counts
+                importance = classification.get('importance', 'low')
+                importance_counts[importance] = importance_counts.get(importance, 0) + 1
+                
                 # Track priority counts
                 if page.get('priority', 0) >= 75:
                     priority_counts['high'] += 1
@@ -471,27 +546,52 @@ async def scrape_entire_website(
                 else:
                     priority_counts['low'] += 1
                 
+                # Generate embeddings for semantic search
+                try:
+                    # Create searchable text (title + summary of content)
+                    searchable_text = f"{page['pageTitle']} {page.get('metaDescription', '')} {full_content[:1000]}"
+                    embeddings = embedding_service.embed_text(searchable_text)
+                except Exception as e:
+                    logger.warning(f"Failed to generate embeddings for {page['pageTitle']}: {e}")
+                    embeddings = None
+                
+                # Generate summary for better retrieval
+                summary = full_content[:500] if len(full_content) > 500 else full_content
+                
                 # Check if page URL already exists
                 existing = await db.knowledge_base.find_one({'url': normalize_url(page['url'])})
                 
-                # Prepare document with rich metadata
+                # Prepare document with enhanced metadata and organization
                 document = {
                     **page,
                     'url': normalize_url(page['url']),
+                    # Classification fields
                     'category': classification['primary'],
                     'categories': classification['categories'],
                     'contentType': classification['type'],
-                    'tags': list(set(classification['categories'] + [classification['type']])),
+                    'importance': classification['importance'],
+                    'tags': list(set(classification['categories'] + [classification['type'], classification['primary']])),
                     'confidence': classification['confidence'],
+                    'classificationScore': classification.get('totalScore', 0),
+                    # Content fields
+                    'summary': summary,
+                    'fullContent': full_content[:10000],  # Store first 10k chars
                     'contentHash': content_hash,
                     'wordCount': len(full_content.split()),
+                    # Metadata
                     'hasContact': len(page['contactInfo']['emails']) > 0 or len(page['contactInfo']['phones']) > 0,
                     'hasTables': len(page['tables']) > 0,
                     'hasDocuments': len(page.get('extractedDocuments', [])) > 0,
                     'documentCount': len(page.get('extractedDocuments', [])),
                     'linkCount': len(page['links']),
+                    # ML/AI fields
+                    'embeddings': embeddings,
+                    'isIndexed': embeddings is not None,
+                    # Timestamps
                     'updatedAt': datetime.utcnow(),
-                    'updatedBy': current_user.get('email')
+                    'updatedBy': current_user.get('email'),
+                    # For placement data
+                    'isPlacementData': classification['primary'] == 'placements'
                 }
                 
                 # Add placement data if available
@@ -542,30 +642,40 @@ async def scrape_entire_website(
             
             logger.info(f"✓ Saved {saved_count} new pages, updated {updated_count} pages, skipped {skipped_duplicates} duplicates")
             logger.info(f"✓ Category distribution: {category_counts}")
+            logger.info(f"✓ Importance distribution: {importance_counts}")
             logger.info(f"✓ Priority distribution: {priority_counts}")
             logger.info(f"✓ Documents extracted: {docs_extracted}")
             
             return {
                 'success': True,
-                'message': f'Successfully scraped and saved {len(pages)} pages ({saved_count} new, {updated_count} updated, {skipped_duplicates} duplicates)',
+                'message': f'Successfully scraped and saved {len(pages)} recent pages ({saved_count} new, {updated_count} updated, {skipped_duplicates} duplicates)',
                 'pages': pages,
                 'stats': {
+                    'totalScraped': total_scraped,
                     'totalPages': len(pages),
+                    'filteredOut': total_scraped - len(pages),
+                    'onlyRecent': only_recent,
+                    'daysThreshold': days_threshold,
                     'newPages': saved_count,
                     'updatedPages': updated_count,
                     'skippedDuplicates': skipped_duplicates,
                     'documentsExtracted': docs_extracted,
                     'categoryBreakdown': category_counts,
+                    'importanceBreakdown': importance_counts,
                     'priorityBreakdown': priority_counts
                 }
             }
         
         return {
             'success': True,
-            'message': f'Successfully scraped {len(pages)} pages',
+            'message': f'Successfully scraped {len(pages)} recent pages (filtered from {total_scraped} total)',
             'pages': pages,
             'stats': {
-                'totalPages': len(pages)
+                'totalScraped': total_scraped,
+                'totalPages': len(pages),
+                'filteredOut': total_scraped - len(pages),
+                'onlyRecent': only_recent,
+                'daysThreshold': days_threshold
             }
         }
         

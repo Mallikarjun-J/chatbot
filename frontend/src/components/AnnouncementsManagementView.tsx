@@ -32,6 +32,10 @@ const AnnouncementsManagementView: React.FC<AnnouncementsManagementViewProps> = 
     const [eventDate, setEventDate] = useState('');
     const [eventTime, setEventTime] = useState('');
     const [location, setLocation] = useState('');
+    
+    const [semester, setSemester] = useState<string>('');
+    const [branch, setBranch] = useState<string>('');
+    const [targetRole, setTargetRole] = useState<string>('Students');
 
     const resetForm = () => {
         setTitle('');
@@ -41,12 +45,18 @@ const AnnouncementsManagementView: React.FC<AnnouncementsManagementViewProps> = 
         setEventDate('');
         setEventTime('');
         setLocation('');
+        setSemester('');
+        setBranch('');
+        setTargetRole('Students');
     };
 
     const handleEditClick = (announcement: Announcement) => {
         setEditingId(announcement.id);
         setTitle(announcement.title);
         setContent(announcement.content);
+        setSemester((announcement as any).semester || '');
+        setBranch((announcement as any).branch || '');
+        setTargetRole((announcement as any).targetRole || 'Students');
         if (announcement.eventDate || announcement.eventTime || announcement.location) {
             setShowEventDetails(true);
             setEventDate(announcement.eventDate || '');
@@ -69,12 +79,15 @@ const AnnouncementsManagementView: React.FC<AnnouncementsManagementViewProps> = 
 
         setIsSubmitting(true);
         try {
-            const payload: Omit<Announcement, 'id' | 'date'> = {
+            const payload: any = {
                 title,
                 content,
                 eventDate: showEventDetails ? (eventDate || null) : null,
                 eventTime: showEventDetails ? (eventTime || null) : null,
                 location: showEventDetails ? (location || null) : null,
+                targetRole: targetRole,
+                semester: semester || null,
+                branch: branch || null,
             };
 
             if (editingId) {
@@ -239,6 +252,66 @@ const AnnouncementsManagementView: React.FC<AnnouncementsManagementViewProps> = 
                             required
                             disabled={isSubmitting}
                         />
+                    </div>
+                    
+                    {/* Target Audience Section */}
+                    <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
+                        <h5 className="text-sm font-semibold text-blue-900 dark:text-blue-300 mb-3">🎯 Target Audience</h5>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label htmlFor="targetRole" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Send To <span className="text-red-500">*</span></label>
+                                <select
+                                    id="targetRole"
+                                    value={targetRole}
+                                    onChange={(e) => setTargetRole(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                    disabled={isSubmitting}
+                                    required
+                                >
+                                    <option value="Students">Students Only</option>
+                                    <option value="Teachers">Teachers Only</option>
+                                    <option value="Both">Both (Students & Teachers)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label htmlFor="semester" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Semester {targetRole === 'Teachers' ? '(N/A for Teachers)' : ''}</label>
+                                <select
+                                    id="semester"
+                                    value={semester}
+                                    onChange={(e) => setSemester(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                    disabled={isSubmitting || targetRole === 'Teachers'}
+                                >
+                                    <option value="">All Semesters</option>
+                                    <option value="1">Semester 1</option>
+                                    <option value="2">Semester 2</option>
+                                    <option value="3">Semester 3</option>
+                                    <option value="4">Semester 4</option>
+                                    <option value="5">Semester 5</option>
+                                    <option value="6">Semester 6</option>
+                                    <option value="7">Semester 7</option>
+                                    <option value="8">Semester 8</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label htmlFor="branch" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{targetRole === 'Teachers' ? 'Department' : 'Branch'}</label>
+                                <select
+                                    id="branch"
+                                    value={branch}
+                                    onChange={(e) => setBranch(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                    disabled={isSubmitting}
+                                >
+                                    <option value="">All Branches</option>
+                                    <option value="Computer Science Engineering">Computer Science Engineering (CSE)</option>
+                                    <option value="Information Science Engineering">Information Science Engineering (ISE)</option>
+                                    <option value="Electronics and Communication Engineering">Electronics and Communication Engineering (ECE)</option>
+                                    <option value="Mechanical Engineering">Mechanical Engineering (ME)</option>
+                                    <option value="Civil Engineering">Civil Engineering (CE)</option>
+                                    <option value="Artificial Intelligence and Machine Learning">Artificial Intelligence and Machine Learning (AI/ML)</option>
+                                </select>
+                            </div>
+                        </div>
                     </div>
 
                     <div className="space-y-2">

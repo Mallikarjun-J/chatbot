@@ -1,5 +1,17 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { User, UserRole, Announcement, Notification } from './types';
+import React, {
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+} from 'react';
+
+import {
+  User,
+  UserRole,
+  Announcement,
+  Notification,
+} from './types';
+
 import Dashboard from './components/Dashboard';
 import AdminDashboard from './components/AdminDashboard';
 import TeacherDashboard from './components/TeacherDashboard';
@@ -7,129 +19,175 @@ import StudentDashboard from './components/StudentDashboard';
 import PublicView from './components/PublicView';
 import LoginModal from './components/LoginModal';
 
+/* =========================
+   API HELPERS
+   ========================= */
+
+const getAuthToken = () => localStorage.getItem('authToken');
+
+async function apiFetch<T>(
+  url: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const token = getAuthToken();
+
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers,
+    },
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`${response.status}:${message}`);
+  }
+
+  return response.json();
+}
+
+/* =========================
+   COMPONENT
+   ========================= */
+
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [isLoginModalOpen, setLoginModalOpen] = useState(false);
+
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [isLoadingAnnouncements, setIsLoadingAnnouncements] = useState(true);
   const [errorAnnouncements, setErrorAnnouncements] = useState<string | null>(null);
+
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const prevAnnouncementsRef = useRef<Announcement[]>([]);
 
-  const [theme, setTheme] = useState(() => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const storedTheme = window.localStorage.getItem('theme');
-      if (storedTheme) return storedTheme;
-      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    }
-    return 'light';
-  });
+  /* =========================
+     SESSION RESTORE
+     ========================= */
 
-  // Restore user session on app load
   useEffect(() => {
     const restoreSession = async () => {
-      const token = localStorage.getItem('authToken');
-      console.log('🔐 Checking for saved token...', token ? 'Token found' : 'No token');
-      
-      if (token) {
-        try {
-          console.log('📡 Verifying token with server...');
-          const response = await fetch('/api/auth/verify-token', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            }
-          });
-          
-          if (response.ok) {
-            const userData = await response.json();
-            console.log('✅ Session restored:', userData.user.email, userData.user.role);
-            setUser(userData.user);
-          } else {
-            console.log('❌ Token invalid, removing...');
-            // Token is invalid, remove it
-            localStorage.removeItem('authToken');
-          }
-        } catch (error) {
-          console.error('❌ Failed to restore session:', error);
-          localStorage.removeItem('authToken');
-        }
+      const token = getAuthToken();
+      if (!token) {
+        setAuthLoading(false);
+        return;
+      }
+
+      try {
+        const data = await apiFetch<{ user: User }>('/api/auth/verify-token', {
+          method: 'POST',
+        });
+        setUser(data.user);
+      } catch {
+        localStorage.removeItem('authToken');
+        setUser(null);
+      } finally {
+        setAuthLoading(false);
       }
     };
-    
+
     restoreSession();
   }, []);
 
-  const fetchAnnouncements = useCallback(async (isInitialLoad = false) => {
-    if (isInitialLoad) {
+  /* =========================
+     ANNOUNCEMENTS
+     ========================= */
+
+  const loadAnnouncements = useCallback(async (showLoader: boolean) => {
+    if (showLoader) {
       setIsLoadingAnnouncements(true);
     }
+
     setErrorAnnouncements(null);
+
     try {
-      if (isInitialLoad) {
-          await new Promise(res => setTimeout(res, 1000));
+      const data = await apiFetch<Announcement[]>('/api/announcements');
+      const sorted = data.sort(
+        (a, b) =>
+          new Date(b.date).getTime() - new Date(a.date).getTime()
+      );
+      setAnnouncements(sorted);
+    } catch (error) {
+      if (error instanceof Error) {
+        setErrorAnnouncements(error.message);
+
+        if (error.message.startsWith('403')) {
+          localStorage.removeItem('authToken');
+          setUser(null);
+        }
       }
-      const response = await fetch('/api/announcements');
-      if (!response.ok) {
-        throw new Error('Failed to fetch announcements.');
-      }
-      const data: Announcement[] = await response.json();
-      setAnnouncements(data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-    } catch (err: any) {
-      setErrorAnnouncements(err.message);
     } finally {
-      if (isInitialLoad) {
+      if (showLoader) {
         setIsLoadingAnnouncements(false);
       }
     }
   }, []);
 
-  // Initial and polled fetching of announcements
+  /* Initial load + polling */
   useEffect(() => {
-    fetchAnnouncements(true); // Initial fetch with loading state
+    if (!user) return;
+
+    loadAnnouncements(true);
+
     const interval = setInterval(() => {
-      fetchAnnouncements(false); // Subsequent fetches without loading state
-    }, 30000); // Poll every 30 seconds
+      if (document.visibilityState === 'visible') {
+        loadAnnouncements(false);
+      }
+    }, 30000);
 
     return () => clearInterval(interval);
-  }, [fetchAnnouncements]);
+  }, [loadAnnouncements, user]);
 
-  // Generate notifications when new announcements are detected
-   useEffect(() => {
-    // On first load, prevAnnouncementsRef is empty, so we just populate it and return.
-    if (prevAnnouncementsRef.current.length === 0) {
+  /* =========================
+     NOTIFICATIONS
+     ========================= */
+
+  useEffect(() => {
+    if (!user) return;
+
+    const previous = prevAnnouncementsRef.current;
+
+    if (previous.length === 0 && announcements.length > 0) {
+      setNotifications(
+        announcements.slice(0, 3).map(ann => ({
+          id: `notif-${ann.id}`,
+          message: `📢 ${ann.title}`,
+          timestamp: ann.date,
+          isRead: false,
+          type: 'announcement',
+        }))
+      );
       prevAnnouncementsRef.current = announcements;
       return;
     }
-    
-    const prevAnnouncementIds = new Set(prevAnnouncementsRef.current.map(a => a.id));
-    const newAnnouncements = announcements.filter(a => !prevAnnouncementIds.has(a.id));
 
-    if (newAnnouncements.length > 0 && user) { // Only create notifications if logged in
-      const newNotifications: Notification[] = newAnnouncements.map(ann => ({
-        id: `notif-${ann.id}`,
-        message: `New Announcement: "${ann.title}"`,
-        timestamp: new Date().toISOString(),
-        isRead: false,
-        type: 'announcement',
-      }));
-      setNotifications(prev => [...newNotifications, ...prev]);
+    const previousIds = new Set(previous.map(a => a.id));
+    const newAnnouncements = announcements.filter(
+      a => !previousIds.has(a.id)
+    );
+
+    if (newAnnouncements.length > 0) {
+      setNotifications(prev => [
+        ...newAnnouncements.map(ann => ({
+          id: `notif-${ann.id}`,
+          message: `📢 New: ${ann.title}`,
+          timestamp: new Date().toISOString(),
+          isRead: false,
+          type: 'announcement',
+        })),
+        ...prev,
+      ]);
     }
 
     prevAnnouncementsRef.current = announcements;
   }, [announcements, user]);
 
-  useEffect(() => {
-    const root = window.document.documentElement;
-    root.classList.remove(theme === 'dark' ? 'light' : 'dark');
-    root.classList.add(theme);
-    localStorage.setItem('theme', theme);
-  }, [theme]);
-
-  const toggleTheme = () => {
-    setTheme((prevTheme) => (prevTheme === 'light' ? 'dark' : 'light'));
-  };
+  /* =========================
+     AUTH HANDLERS
+     ========================= */
 
   const handleLoginSuccess = useCallback((loggedInUser: User) => {
     setUser(loggedInUser);
@@ -138,140 +196,161 @@ const App: React.FC = () => {
 
   const handleLogout = useCallback(() => {
     setUser(null);
-    setNotifications([]); // Clear notifications on logout
+    setNotifications([]);
     localStorage.removeItem('authToken');
   }, []);
 
-  const handleUserUpdate = (updatedUser: User) => {
+  const handleUserUpdate = useCallback((updatedUser: User) => {
     setUser(updatedUser);
-  };
-  
-  const handleCreateAnnouncement = async (announcement: Omit<Announcement, 'id' | 'date'>) => {
-      const token = localStorage.getItem('authToken');
-      try {
-        const response = await fetch('/api/announcements', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify(announcement),
-        });
-        if (!response.ok) throw new Error('Failed to create announcement.');
-        await fetchAnnouncements();
-      } catch (error) {
-          console.error(error);
-          alert('Error: Could not create announcement.');
-      }
+  }, []);
+
+  /* =========================
+     ANNOUNCEMENT CRUD
+     ========================= */
+
+  const handleCreateAnnouncement = async (
+    announcement: Omit<Announcement, 'id' | 'date'>
+  ) => {
+    try {
+      await apiFetch('/api/announcements', {
+        method: 'POST',
+        body: JSON.stringify(announcement),
+      });
+      loadAnnouncements(false);
+    } catch {
+      alert('Failed to create announcement');
+    }
   };
 
-  const handleUpdateAnnouncement = async (updatedAnnouncement: Announcement) => {
-      const token = localStorage.getItem('authToken');
-      try {
-        const { id, title, content, eventDate, eventTime, location } = updatedAnnouncement;
-        const response = await fetch(`/api/announcements/${id}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({ title, content, eventDate, eventTime, location }),
-        });
-        if (!response.ok) throw new Error('Failed to update announcement.');
-        await fetchAnnouncements();
-      } catch (error) {
-          console.error(error);
-          alert('Error: Could not update announcement.');
-      }
+  const handleUpdateAnnouncement = async (announcement: Announcement) => {
+    try {
+      const { id, title, content, eventDate, eventTime, location } =
+        announcement;
+
+      await apiFetch(`/api/announcements/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          title,
+          content,
+          eventDate,
+          eventTime,
+          location,
+        }),
+      });
+
+      loadAnnouncements(false);
+    } catch {
+      alert('Failed to update announcement');
+    }
   };
 
-  const handleDeleteAnnouncement = async (announcementId: string) => {
-      if (window.confirm('Are you sure you want to delete this announcement?')) {
-          const token = localStorage.getItem('authToken');
-          try {
-            const response = await fetch(`/api/announcements/${announcementId}`, {
-                method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${token}` },
-            });
-            if (!response.ok) throw new Error('Failed to delete announcement.');
-            await fetchAnnouncements();
-          } catch (error) {
-            console.error(error);
-            alert('Error: Could not delete announcement.');
-          }
-      }
+  const handleDeleteAnnouncement = async (id: string) => {
+    if (!window.confirm('Delete this announcement?')) return;
+
+    try {
+      await apiFetch(`/api/announcements/${id}`, {
+        method: 'DELETE',
+      });
+      loadAnnouncements(false);
+    } catch {
+      alert('Failed to delete announcement');
+    }
   };
 
-  const handleMarkNotificationAsRead = (notificationId: string) => {
+  /* =========================
+     NOTIFICATION HANDLERS
+     ========================= */
+
+  const markNotificationAsRead = (id: string) => {
     setNotifications(prev =>
-      prev.map(n => (n.id === notificationId ? { ...n, isRead: true } : n))
+      prev.map(n =>
+        n.id === id ? { ...n, isRead: true } : n
+      )
     );
   };
 
-  const handleMarkAllNotificationsAsRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+  const markAllNotificationsAsRead = () => {
+    setNotifications(prev =>
+      prev.map(n => ({ ...n, isRead: true }))
+    );
   };
 
-  const renderRoleSpecificDashboard = () => {
+  /* =========================
+     ROLE DASHBOARD
+     ========================= */
+
+  const renderRoleDashboard = () => {
     if (!user) return null;
+
     switch (user.role) {
       case UserRole.ADMIN:
-        return <AdminDashboard 
-          user={user} 
-          announcements={announcements}
-          isLoadingAnnouncements={isLoadingAnnouncements}
-          errorAnnouncements={errorAnnouncements}
-          onCreateAnnouncement={handleCreateAnnouncement}
-          onUpdateAnnouncement={handleUpdateAnnouncement}
-          onDeleteAnnouncement={handleDeleteAnnouncement}
-          onRefreshAnnouncements={() => fetchAnnouncements(false)}
-        />;
+        return (
+          <AdminDashboard
+            user={user}
+            announcements={announcements}
+            isLoadingAnnouncements={isLoadingAnnouncements}
+            errorAnnouncements={errorAnnouncements}
+            onCreateAnnouncement={handleCreateAnnouncement}
+            onUpdateAnnouncement={handleUpdateAnnouncement}
+            onDeleteAnnouncement={handleDeleteAnnouncement}
+            onRefreshAnnouncements={() => loadAnnouncements(false)}
+          />
+        );
+
       case UserRole.TEACHER:
-        return <TeacherDashboard 
-          user={user} 
-          announcements={announcements}
-          isLoadingAnnouncements={isLoadingAnnouncements}
-          errorAnnouncements={errorAnnouncements}
-        />;
+        return (
+          <TeacherDashboard
+            user={user}
+            announcements={announcements}
+            isLoadingAnnouncements={isLoadingAnnouncements}
+            errorAnnouncements={errorAnnouncements}
+          />
+        );
+
       case UserRole.STUDENT:
-        return <StudentDashboard 
-          user={user} 
-          announcements={announcements}
-          isLoadingAnnouncements={isLoadingAnnouncements}
-          errorAnnouncements={errorAnnouncements}
-        />;
+        return (
+          <StudentDashboard
+            user={user}
+            announcements={announcements}
+            isLoadingAnnouncements={isLoadingAnnouncements}
+            errorAnnouncements={errorAnnouncements}
+          />
+        );
+
       default:
-        return <p>Unknown user role. Please contact support.</p>;
+        return <p>Invalid user role</p>;
     }
   };
+
+  /* =========================
+     RENDER
+     ========================= */
+
+  if (authLoading) {
+    return <div className="min-h-screen bg-gray-100 dark:bg-gray-900" />;
+  }
 
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-300">
       {user ? (
-        <Dashboard 
-            user={user} 
-            onLogout={handleLogout} 
-            theme={theme} 
-            toggleTheme={toggleTheme} 
-            onUserUpdate={handleUserUpdate} 
-            announcements={announcements}
-            notifications={notifications}
-            onMarkNotificationAsRead={handleMarkNotificationAsRead}
-            onMarkAllNotificationsAsRead={handleMarkAllNotificationsAsRead}
+        <Dashboard
+          user={user}
+          onLogout={handleLogout}
+          onUserUpdate={handleUserUpdate}
+          announcements={announcements}
+          notifications={notifications}
+          onMarkNotificationAsRead={markNotificationAsRead}
+          onMarkAllNotificationsAsRead={markAllNotificationsAsRead}
         >
-          {renderRoleSpecificDashboard()}
+          {renderRoleDashboard()}
         </Dashboard>
       ) : (
         <>
-          <PublicView 
-            onLoginClick={() => setLoginModalOpen(true)} 
-            theme={theme} 
-            toggleTheme={toggleTheme}
-          />
+          <PublicView onLoginClick={() => setLoginModalOpen(true)} />
           {isLoginModalOpen && (
-            <LoginModal 
-              onClose={() => setLoginModalOpen(false)} 
-              onLoginSuccess={handleLoginSuccess} 
+            <LoginModal
+              onClose={() => setLoginModalOpen(false)}
+              onLoginSuccess={handleLoginSuccess}
             />
           )}
         </>

@@ -139,14 +139,41 @@ const UserRow: React.FC<{
 }> = ({ user, onEdit, onDelete, showBranchSection = false, userRole, showNotification, onRequestDelete }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [selectedRole, setSelectedRole] = useState(user.role);
+    const [selectedBranch, setSelectedBranch] = useState(user.branch || '');
+    const [selectedSection, setSelectedSection] = useState(user.section || '');
+    const [selectedSemester, setSelectedSemester] = useState((user as any).semester || '');
 
-    const handleSave = () => {
+    const handleSave = async () => {
         try {
-            onEdit(user.id, selectedRole);
+            const token = localStorage.getItem('authToken');
+            const response = await fetch(`/api/users/${user.id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    role: selectedRole,
+                    branch: selectedBranch || null,
+                    section: selectedSection || null,
+                    semester: selectedSemester || null
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to update user');
+            }
+
+            // Update local state
+            user.role = selectedRole;
+            user.branch = selectedBranch;
+            user.section = selectedSection;
+            (user as any).semester = selectedSemester;
+            
             setIsEditing(false);
-            showNotification('success', `${user.name}'s role updated to ${selectedRole}`);
+            showNotification('success', `${user.name}'s information updated successfully`);
         } catch (error) {
-            showNotification('error', 'Failed to update user role');
+            showNotification('error', 'Failed to update user');
         }
     }
 
@@ -167,12 +194,53 @@ const UserRow: React.FC<{
             {showBranchSection && (
                 <>
                     <td className="py-3 px-4 text-sm text-gray-700 dark:text-gray-300">
-                        {user.branch || <span className="text-gray-400 italic">Not set</span>}
+                        {isEditing ? (
+                            <select
+                                value={selectedBranch}
+                                onChange={(e) => setSelectedBranch(e.target.value)}
+                                className="text-xs p-1 rounded-md bg-gray-100 dark:bg-gray-600 border-gray-300 dark:border-gray-500 w-full"
+                            >
+                                <option value="">Not set</option>
+                                <option value="Computer Science Engineering">CSE</option>
+                                <option value="Information Science Engineering">ISE</option>
+                                <option value="Electronics and Communication Engineering">ECE</option>
+                                <option value="Mechanical Engineering">ME</option>
+                                <option value="Civil Engineering">CE</option>
+                                <option value="Artificial Intelligence and Machine Learning">AI/ML</option>
+                            </select>
+                        ) : (
+                            user.branch || <span className="text-gray-400 italic">Not set</span>
+                        )}
                     </td>
-                    {userRole !== 'teacher' && (
-                        <td className="py-3 px-4 text-sm text-gray-700 dark:text-gray-300">
-                            {user.section || <span className="text-gray-400 italic">Not set</span>}
-                        </td>
+                    {userRole === 'student' && (
+                        <>
+                            <td className="py-3 px-4 text-sm text-gray-700 dark:text-gray-300">
+                                {isEditing ? (
+                                    <input
+                                        type="text"
+                                        value={selectedSemester}
+                                        onChange={(e) => setSelectedSemester(e.target.value)}
+                                        placeholder="e.g., 5"
+                                        className="text-xs p-1 rounded-md bg-gray-100 dark:bg-gray-600 border-gray-300 dark:border-gray-500 w-full"
+                                    />
+                                ) : (
+                                    (user as any).semester || <span className="text-gray-400 italic">Not set</span>
+                                )}
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-700 dark:text-gray-300">
+                                {isEditing ? (
+                                    <input
+                                        type="text"
+                                        value={selectedSection}
+                                        onChange={(e) => setSelectedSection(e.target.value)}
+                                        placeholder="e.g., A"
+                                        className="text-xs p-1 rounded-md bg-gray-100 dark:bg-gray-600 border-gray-300 dark:border-gray-500 w-full"
+                                    />
+                                ) : (
+                                    user.section || <span className="text-gray-400 italic">Not set</span>
+                                )}
+                            </td>
+                        </>
                     )}
                 </>
             )}
@@ -222,7 +290,7 @@ const CreateUserForm: React.FC<{
 }> = ({ onCreateUser, showNotification, onUserAdded }) => {
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
+    const [password] = useState('password123'); // Default password - no need to enter
     const [role, setRole] = useState<UserRole.STUDENT | UserRole.TEACHER>(UserRole.STUDENT);
     const [branch, setBranch] = useState('');
     const [section, setSection] = useState('');
@@ -231,12 +299,8 @@ const CreateUserForm: React.FC<{
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
-        if (!name.trim() || !email.trim() || !password.trim()) {
-            showNotification('error', 'Name, email, and password cannot be empty.');
-            return;
-        }
-        if (password.length < 6) {
-            showNotification('error', 'Password must be at least 6 characters long.');
+        if (!name.trim() || !email.trim()) {
+            showNotification('error', 'Name and email cannot be empty.');
             return;
         }
         if (role === UserRole.STUDENT && (!branch.trim() || !section.trim() || !semester.trim())) {
@@ -266,7 +330,7 @@ const CreateUserForm: React.FC<{
             // Reset form on success
             setName('');
             setEmail('');
-            setPassword('');
+            // password stays as default 'password123'
             setRole(UserRole.STUDENT);
             setBranch('');
             setSection('');
@@ -282,9 +346,15 @@ const CreateUserForm: React.FC<{
 
     return (
         <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow border border-gray-200 dark:border-gray-700 mb-6">
-            <h4 className="text-lg font-semibold mb-4 text-gray-800 dark:text-white">Add New User</h4>
-            <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="flex justify-between items-start mb-4">
+                <div>
+                    <h4 className="text-lg font-semibold text-gray-800 dark:text-white">Add New User</h4>
+                    <p className="text-sm text-blue-600 dark:text-blue-400 mt-1">
+                        🔒 Default password: <span className="font-mono font-semibold">password123</span>
+                    </p>
+                </div>
+            </div>
+            <form onSubmit={handleSubmit} className="space-y-4">              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                         <label htmlFor="name" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Full Name</label>
                         <input type="text" id="name" value={name} onChange={(e) => setName(e.target.value)} required disabled={isSubmitting} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 dark:bg-gray-700 dark:border-gray-600"/>
@@ -292,10 +362,6 @@ const CreateUserForm: React.FC<{
                     <div>
                         <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Email Address</label>
                         <input type="email" id="email" value={email} onChange={(e) => setEmail(e.target.value)} required disabled={isSubmitting} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 dark:bg-gray-700 dark:border-gray-600"/>
-                    </div>
-                    <div>
-                        <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Password</label>
-                        <input type="password" id="password" value={password} onChange={(e) => setPassword(e.target.value)} required disabled={isSubmitting} placeholder="Min 6 characters" className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 dark:bg-gray-700 dark:border-gray-600"/>
                     </div>
                     <div>
                         <label htmlFor="role" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Role</label>
@@ -410,6 +476,12 @@ const UserManagementView: React.FC<UserManagementViewProps> = ({ users, onCreate
     const [notification, setNotification] = useState<Notification | null>(null);
     const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null);
     const [successModal, setSuccessModal] = useState<SuccessModal | null>(null);
+    
+    // Search and filter states
+    const [searchTerm, setSearchTerm] = useState('');
+    const [filterDepartment, setFilterDepartment] = useState('');
+    const [filterSemester, setFilterSemester] = useState('');
+    const [filterSection, setFilterSection] = useState('');
 
     const showNotification = (type: 'success' | 'error', message: string) => {
         setNotification({ type, message });
@@ -447,10 +519,32 @@ const UserManagementView: React.FC<UserManagementViewProps> = ({ users, onCreate
         setSuccessModal(null);
     };
 
+    // Apply search and filters
+    const filterUsers = (userList: User[]) => {
+        return userList.filter(user => {
+            // Search filter
+            const matchesSearch = searchTerm === '' || 
+                user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                user.email.toLowerCase().includes(searchTerm.toLowerCase());
+            
+            // Department/Branch filter
+            const matchesDepartment = filterDepartment === '' || user.branch === filterDepartment;
+            
+            // Semester filter
+            const matchesSemester = filterSemester === '' || user.semester === filterSemester;
+            
+            // Section filter
+            const matchesSection = filterSection === '' || 
+                user.section?.toUpperCase() === filterSection.toUpperCase();
+            
+            return matchesSearch && matchesDepartment && matchesSemester && matchesSection;
+        });
+    };
+
     // Separate users by role
-    const teachers = users.filter(user => user.role === UserRole.TEACHER);
-    const students = users.filter(user => user.role === UserRole.STUDENT);
-    const admins = users.filter(user => user.role === UserRole.ADMIN);
+    const teachers = filterUsers(users.filter(user => user.role === UserRole.TEACHER));
+    const students = filterUsers(users.filter(user => user.role === UserRole.STUDENT));
+    const admins = filterUsers(users.filter(user => user.role === UserRole.ADMIN));
 
     const UserTable: React.FC<{ 
         users: User[], 
@@ -483,8 +577,11 @@ const UserManagementView: React.FC<UserManagementViewProps> = ({ users, onCreate
                                 {showBranchSection && (
                                     <>
                                         <th scope="col" className="py-3 px-4 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">{userRole === 'teacher' ? 'Department' : 'Branch'}</th>
-                                        {userRole !== 'teacher' && (
-                                            <th scope="col" className="py-3 px-4 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Sem + Section</th>
+                                        {userRole === 'student' && (
+                                            <>
+                                                <th scope="col" className="py-3 px-4 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Semester</th>
+                                                <th scope="col" className="py-3 px-4 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Section</th>
+                                            </>
                                         )}
                                     </>
                                 )}
@@ -547,6 +644,104 @@ const UserManagementView: React.FC<UserManagementViewProps> = ({ users, onCreate
             </div>
 
             <CreateUserForm onCreateUser={onCreateUser} showNotification={showNotification} onUserAdded={handleUserAdded} />
+
+            {/* Search and Filters */}
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow border border-gray-200 dark:border-gray-700 mb-6">
+                <h4 className="text-lg font-semibold text-gray-800 dark:text-white mb-4">🔍 Search & Filter Users</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                    {/* Search Input */}
+                    <div className="lg:col-span-2">
+                        <label htmlFor="search" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Search by Name or Email
+                        </label>
+                        <input
+                            type="text"
+                            id="search"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            placeholder="Type to search..."
+                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                        />
+                    </div>
+
+                    {/* Department Filter */}
+                    <div>
+                        <label htmlFor="filterDepartment" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Department/Branch
+                        </label>
+                        <select
+                            id="filterDepartment"
+                            value={filterDepartment}
+                            onChange={(e) => setFilterDepartment(e.target.value)}
+                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                        >
+                            <option value="">All Departments</option>
+                            <option value="Computer Science Engineering">Computer Science Engineering (CSE)</option>
+                            <option value="Information Science Engineering">Information Science Engineering (ISE)</option>
+                            <option value="Electronics and Communication Engineering">Electronics and Communication Engineering (ECE)</option>
+                            <option value="Mechanical Engineering">Mechanical Engineering (ME)</option>
+                            <option value="Civil Engineering">Civil Engineering (CE)</option>
+                            <option value="Artificial Intelligence and Machine Learning">Artificial Intelligence and Machine Learning (AI/ML)</option>
+                        </select>
+                    </div>
+
+                    {/* Semester Filter */}
+                    <div>
+                        <label htmlFor="filterSemester" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Semester
+                        </label>
+                        <select
+                            id="filterSemester"
+                            value={filterSemester}
+                            onChange={(e) => setFilterSemester(e.target.value)}
+                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                        >
+                            <option value="">All Semesters</option>
+                            <option value="1">1st Semester</option>
+                            <option value="2">2nd Semester</option>
+                            <option value="3">3rd Semester</option>
+                            <option value="4">4th Semester</option>
+                            <option value="5">5th Semester</option>
+                            <option value="6">6th Semester</option>
+                            <option value="7">7th Semester</option>
+                            <option value="8">8th Semester</option>
+                        </select>
+                    </div>
+
+                    {/* Section Filter */}
+                    <div>
+                        <label htmlFor="filterSection" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Section
+                        </label>
+                        <input
+                            type="text"
+                            id="filterSection"
+                            value={filterSection}
+                            onChange={(e) => setFilterSection(e.target.value.toUpperCase())}
+                            placeholder="e.g., A, B, C"
+                            maxLength={1}
+                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                        />
+                    </div>
+                </div>
+                
+                {/* Clear Filters Button */}
+                {(searchTerm || filterDepartment || filterSemester || filterSection) && (
+                    <div className="mt-4">
+                        <button
+                            onClick={() => {
+                                setSearchTerm('');
+                                setFilterDepartment('');
+                                setFilterSemester('');
+                                setFilterSection('');
+                            }}
+                            className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                        >
+                            Clear All Filters
+                        </button>
+                    </div>
+                )}
+            </div>
 
             {/* Teachers Section */}
             <UserTable 

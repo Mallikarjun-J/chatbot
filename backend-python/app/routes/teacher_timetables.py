@@ -121,3 +121,56 @@ async def delete_teacher_timetable(
         raise HTTPException(status_code=404, detail="Timetable not found")
     
     return {"message": "Teaching schedule deleted successfully"}
+
+@router.put("/api/timetables/teacher/{timetable_id}")
+async def update_teacher_timetable(
+    timetable_id: str,
+    timetable_data: TeacherTimetableCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    """Update teacher's personal teaching schedule"""
+    if current_user.get("role") != "Teacher":
+        raise HTTPException(status_code=403, detail="Teacher access required")
+    
+    db = get_database()
+    
+    try:
+        object_id = ObjectId(timetable_id)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid timetable ID")
+    
+    # Verify ownership
+    timetable = await db.teachers_timetable.find_one({"_id": object_id})
+    
+    if not timetable:
+        raise HTTPException(status_code=404, detail="Timetable not found")
+    
+    # Check if this timetable belongs to the current teacher
+    teacher_email = current_user.get("email")
+    if timetable.get("teacherEmail") != teacher_email:
+        raise HTTPException(status_code=403, detail="You can only update your own timetables")
+    
+    # Convert Pydantic models to dicts for MongoDB
+    days_dict = {}
+    for day, slots in timetable_data.days.items():
+        days_dict[day] = [slot.dict() for slot in slots]
+    
+    # Update document
+    update_data = {
+        "branch": timetable_data.branch,
+        "days": days_dict,
+        "updatedAt": datetime.utcnow()
+    }
+    
+    result = await db.teachers_timetable.update_one(
+        {"_id": object_id},
+        {"$set": update_data}
+    )
+    
+    if result.modified_count == 0 and result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Timetable not found")
+    
+    return {
+        "message": f"Teaching schedule '{timetable_data.branch}' updated successfully",
+        "id": timetable_id
+    }

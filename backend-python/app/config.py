@@ -29,8 +29,8 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     
     # College Information
-    COLLEGE_NAME: str = "College"
-    COLLEGE_LOCATION: str = "India"
+    COLLEGE_NAME: str = "BMS Institute of Technology and Management"
+    COLLEGE_LOCATION: str = "Yelahanka, Bangalore"
     
     # Email Configuration
     SMTP_HOST: str = "smtp.gmail.com"  # Default to Gmail

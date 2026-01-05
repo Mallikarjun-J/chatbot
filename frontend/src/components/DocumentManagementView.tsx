@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, DragEvent } from 'react';
 import { Document } from '../types';
-import { DocumentIcon, UploadIcon, Spinner, CheckCircleIcon, TrashIcon } from './Icons';
+import { DocumentIcon, UploadIcon, Spinner, CheckCircleIcon, TrashIcon, SparklesIcon } from './Icons';
+import DocumentDescriptionAIAssistant from './DocumentDescriptionAIAssistant';
 
 interface DocumentManagementViewProps {
     onBack: () => void;
@@ -33,12 +34,16 @@ const DocumentManagementView: React.FC<DocumentManagementViewProps> = ({ onBack 
     const [semester, setSemester] = useState<string>('');
     const [branch, setBranch] = useState<string>('');
     const [description, setDescription] = useState<string>('');
+    const [targetRole, setTargetRole] = useState<string>('Students');
     
     // Filters
     const [filterType, setFilterType] = useState<string>('all');
     const [filterSubject, setFilterSubject] = useState<string>('all');
     const [filterSemester, setFilterSemester] = useState<string>('all');
     const [showAnalysisModal, setShowAnalysisModal] = useState<Document | null>(null);
+    
+    // AI Assistant
+    const [showAIAssistant, setShowAIAssistant] = useState(false);
     
     const fetchDocuments = async () => {
         setIsLoading(true);
@@ -91,8 +96,14 @@ const DocumentManagementView: React.FC<DocumentManagementViewProps> = ({ onBack 
             return;
         }
         
-        if (!documentType || !subject || !semester) {
-            setUploadError('Please fill in Document Type, Subject, and Semester before uploading.');
+        // For teachers, semester is not required; for students, it is
+        if (!documentType || !subject) {
+            setUploadError('Please fill in Document Type and Subject before uploading.');
+            return;
+        }
+        
+        if (targetRole === 'Students' && !semester) {
+            setUploadError('Please select a Semester for student documents.');
             return;
         }
         
@@ -105,6 +116,7 @@ const DocumentManagementView: React.FC<DocumentManagementViewProps> = ({ onBack 
         formData.append('documentType', documentType);
         formData.append('subject', subject);
         formData.append('semester', semester);
+        formData.append('targetRole', targetRole);
         if (branch) formData.append('branch', branch);
         if (description) formData.append('description', description);
 
@@ -120,7 +132,7 @@ const DocumentManagementView: React.FC<DocumentManagementViewProps> = ({ onBack 
                 throw new Error(errorData.error || 'Upload failed.');
             }
             const result = await response.json();
-            setUploadSuccess(`✅ Successfully uploaded ${uploadFile.name}!\n📊 Type: ${documentType} | Subject: ${subject} | Semester: ${semester}`);
+            setUploadSuccess(`✅ Successfully uploaded ${uploadFile.name}!\n📊 Type: ${documentType} | Subject: ${subject}${semester ? ` | Semester: ${semester}` : ''}`);
             
             // Reset form
             setUploadFile(null);
@@ -129,8 +141,13 @@ const DocumentManagementView: React.FC<DocumentManagementViewProps> = ({ onBack 
             setSemester('');
             setBranch('');
             setDescription('');
+            setTargetRole('Students');
             
-            await fetchDocuments(); // Refresh the list
+            // Refresh the documents list
+            await fetchDocuments();
+            
+            // Clear success message after 5 seconds
+            setTimeout(() => setUploadSuccess(null), 5000);
         } catch (error: any) {
             setUploadError(error.message);
         } finally {
@@ -219,17 +236,55 @@ const DocumentManagementView: React.FC<DocumentManagementViewProps> = ({ onBack 
                                 required
                             />
                         </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                Semester <span className="text-red-500">*</span>
+                                Send To <span className="text-red-500">*</span>
+                            </label>
+                            <select
+                                value={targetRole}
+                                onChange={(e) => setTargetRole(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                required
+                            >
+                                <option value="Students">Students Only</option>
+                                <option value="Teachers">Teachers Only</option>
+                                <option value="Both">Both (Students & Teachers)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                {targetRole === 'Teachers' ? 'Department' : 'Branch'} (Optional)
+                            </label>
+                            <select 
+                                value={branch}
+                                onChange={(e) => setBranch(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            >
+                                <option value="">All {targetRole === 'Teachers' ? 'Departments' : 'Branches'}</option>
+                                <option value="Computer Science Engineering">Computer Science Engineering (CSE)</option>
+                                <option value="Information Science Engineering">Information Science Engineering (ISE)</option>
+                                <option value="Electronics and Communication Engineering">Electronics and Communication Engineering (ECE)</option>
+                                <option value="Mechanical Engineering">Mechanical Engineering (ME)</option>
+                                <option value="Civil Engineering">Civil Engineering (CE)</option>
+                                <option value="Artificial Intelligence and Machine Learning">Artificial Intelligence and Machine Learning (AI/ML)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                Semester {targetRole === 'Teachers' ? '(N/A for Teachers)' : ''}
+                                <span className="text-red-500">*</span>
                             </label>
                             <select 
                                 value={semester} 
                                 onChange={(e) => setSemester(e.target.value)}
                                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                                 required
+                                disabled={targetRole === 'Teachers'}
                             >
                                 <option value="">Select Semester</option>
+                                <option value="all">All Semesters</option>
                                 <option value="1">Semester 1</option>
                                 <option value="2">Semester 2</option>
                                 <option value="3">Semester 3</option>
@@ -241,39 +296,31 @@ const DocumentManagementView: React.FC<DocumentManagementViewProps> = ({ onBack 
                             </select>
                         </div>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                Branch (Optional)
-                            </label>
-                            <select 
-                                value={branch}
-                                onChange={(e) => setBranch(e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                            >
-                                <option value="">All Branches</option>
-                                <option value="Computer Science Engineering">Computer Science Engineering (CSE)</option>
-                                <option value="Information Science Engineering">Information Science Engineering (ISE)</option>
-                                <option value="Electronics and Communication Engineering">Electronics and Communication Engineering (ECE)</option>
-                                <option value="Mechanical Engineering">Mechanical Engineering (ME)</option>
-                                <option value="Civil Engineering">Civil Engineering (CE)</option>
-                                <option value="Artificial Intelligence and Machine Learning">Artificial Intelligence and Machine Learning (AI/ML)</option>
-                                <option value="Data Science">Data Science (DS)</option>
-                                <option value="Electrical Engineering">Electrical Engineering (EE)</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                Description (Optional)
-                            </label>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Description (Optional)
+                            <span className="ml-2 text-xs text-purple-600 dark:text-purple-400">✨ AI available</span>
+                        </label>
+                        <div className="relative">
                             <input 
                                 type="text"
                                 value={description}
                                 onChange={(e) => setDescription(e.target.value)}
-                                placeholder="Brief description"
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                placeholder="Brief description (or use AI ✨)"
+                                className="w-full px-3 py-2 pr-10 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                             />
+                            <button
+                                type="button"
+                                onClick={() => setShowAIAssistant(true)}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300 transition-colors hover:scale-110"
+                                title="AI Description Assistant - Generate description using AI"
+                            >
+                                <SparklesIcon className="w-5 h-5" />
+                            </button>
                         </div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Click the ✨ icon to generate a description using AI
+                        </p>
                     </div>
                 </div>
                 
@@ -291,7 +338,11 @@ const DocumentManagementView: React.FC<DocumentManagementViewProps> = ({ onBack 
                 {uploadError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{uploadError}</p>}
                 {uploadSuccess && <p className="mt-2 text-sm text-green-600 dark:text-green-400 whitespace-pre-line">{uploadSuccess}</p>}
                 <div className="mt-4 text-center">
-                    <button onClick={handleUpload} disabled={!uploadFile || !documentType || !subject || !semester || isUploading} className="w-full max-w-xs mx-auto flex items-center justify-center space-x-2 bg-red-600 text-white px-6 py-3 rounded-md hover:bg-red-700 transition-colors disabled:bg-red-400 disabled:cursor-not-allowed">
+                    <button 
+                        onClick={handleUpload} 
+                        disabled={!uploadFile || !documentType || !subject || (targetRole === 'Students' && !semester) || isUploading} 
+                        className="w-full max-w-xs mx-auto flex items-center justify-center space-x-2 bg-red-600 text-white px-6 py-3 rounded-md hover:bg-red-700 transition-colors disabled:bg-red-400 disabled:cursor-not-allowed"
+                    >
                         {isUploading ? <><Spinner className="w-5 h-5" /><span>Uploading...</span></> : <><UploadIcon className="w-5 h-5" /><span>Upload Document</span></>}
                     </button>
                 </div>
@@ -493,6 +544,19 @@ const DocumentManagementView: React.FC<DocumentManagementViewProps> = ({ onBack 
                     </div>
                 </div>
             )}
+            
+            {/* AI Description Assistant Modal */}
+            <DocumentDescriptionAIAssistant
+                isOpen={showAIAssistant}
+                onClose={() => setShowAIAssistant(false)}
+                documentName={uploadFile?.name || ''}
+                documentType={documentType}
+                subject={subject}
+                semester={semester}
+                branch={branch}
+                currentDescription={description}
+                onApplySuggestion={(suggestion) => setDescription(suggestion)}
+            />
         </div>
     );
 };

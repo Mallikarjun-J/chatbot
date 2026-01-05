@@ -22,34 +22,18 @@ const AnnouncementsTicker: React.FC<AnnouncementsTickerProps> = ({ announcements
                 </div>
                 <div className="ml-3 flex-1">
                     <p className="text-sm font-bold mb-2">Recent Updates</p>
-                    <ul className="space-y-3">
+                    <ul className="space-y-2">
                        {recentAnnouncements.map(ann => (
                            <li key={ann.id} className="text-sm">
-                               <div>
-                                    <span className="font-semibold">{ann.title}:</span> {ann.content}
+                               <div className="line-clamp-1">
+                                    <span className="font-semibold">{ann.title}</span>
+                                    {(ann.eventDate || ann.eventTime) && (
+                                        <span className="text-xs ml-2">
+                                            {ann.eventDate && `📅 ${new Date(ann.eventDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}`}
+                                            {ann.eventTime && ` ⏰ ${ann.eventTime}`}
+                                        </span>
+                                    )}
                                </div>
-                                {(ann.eventDate || ann.eventTime || ann.location) && (
-                                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-yellow-700 dark:text-yellow-400">
-                                        {ann.eventDate && (
-                                            <span className="flex items-center gap-1.5 font-medium">
-                                                <CalendarIcon className="w-4 h-4" />
-                                                {new Date(ann.eventDate).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' })}
-                                            </span>
-                                        )}
-                                        {ann.eventTime && (
-                                            <span className="flex items-center gap-1.5 font-medium">
-                                                <ClockIcon className="w-4 h-4" />
-                                                {ann.eventTime}
-                                            </span>
-                                        )}
-                                        {ann.location && (
-                                            <span className="flex items-center gap-1.5 font-medium">
-                                                <LocationMarkerIcon className="w-4 h-4" />
-                                                {ann.location}
-                                            </span>
-                                        )}
-                                    </div>
-                                )}
                            </li>
                        ))}
                     </ul>

@@ -277,7 +277,7 @@ const WebScrapingView: React.FC<WebScrapingViewProps> = ({ onBack }) => {
                     <h4 className="text-lg font-bold text-gray-800 dark:text-white">
                         📚 Scraped Pages ({scrapedPages.length})
                     </h4>
-                    <div className="space-y-3 max-h-[600px] overflow-y-auto">
+                    <div className="space-y-3 max-h-[600px] overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-gray-100 dark:[&::-webkit-scrollbar-track]:bg-gray-800 [&::-webkit-scrollbar-thumb]:bg-black dark:[&::-webkit-scrollbar-thumb]:bg-black [&::-webkit-scrollbar-thumb]:rounded-full">
                         {scrapedPages.map((page, index) => (
                             <div key={index} className="bg-white dark:bg-gray-800 p-5 rounded-lg shadow border border-gray-200 dark:border-gray-700">
                                 <div className="flex justify-between items-start mb-3">
@@ -332,7 +332,7 @@ const WebScrapingView: React.FC<WebScrapingViewProps> = ({ onBack }) => {
                                         <summary className="cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400 hover:underline">
                                             View Content Sections ({page.sections.length})
                                         </summary>
-                                        <div className="mt-2 space-y-2 max-h-64 overflow-y-auto">
+                                        <div className="mt-2 space-y-2 max-h-64 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-gray-100 dark:[&::-webkit-scrollbar-track]:bg-gray-800 [&::-webkit-scrollbar-thumb]:bg-black dark:[&::-webkit-scrollbar-thumb]:bg-black [&::-webkit-scrollbar-thumb]:rounded-full">
                                             {page.sections.slice(0, 5).map((section, idx) => (
                                                 <div key={idx} className="p-2 bg-gray-50 dark:bg-gray-900 rounded text-xs">
                                                     <div className="font-semibold text-gray-800 dark:text-white">

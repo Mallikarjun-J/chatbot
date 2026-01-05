@@ -1,6 +1,6 @@
 import React, { useState, FormEvent, useRef, useEffect, useCallback } from 'react';
 import { User, UserRole, ChatMessage, GroundingSource, Announcement, Document } from '../types';
-import { Spinner, SendIcon, UserIcon, SparklesIcon, TypingIndicator, LinkIcon, MicrophoneIcon } from './Icons';
+import { Spinner, SendIcon, UserIcon, SparklesIcon, TypingIndicator, LinkIcon, MicrophoneIcon, SpeakerWaveIcon, SpeakerXMarkIcon } from './Icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 // TODO: Frontend should call /api/chat endpoint instead of using AI directly
@@ -44,7 +44,7 @@ function createBlob(data: Float32Array): AudioBlob {
 }
 
 
-const getRoleBasedContext = (user: User | undefined, documents: Document[], users: User[]): RoleBasedContext => {
+const getRoleBasedContext = (user: User | undefined, documents: Document[], users: User[], studentAcademicData?: any): RoleBasedContext => {
   const recentTimetable = documents
     .filter(doc => doc.type === 'timetable')
     .sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime())[0];
@@ -93,21 +93,21 @@ const getRoleBasedContext = (user: User | undefined, documents: Document[], user
       };
 
     case UserRole.STUDENT:
-       // Mock data for a specific student for demonstration
+       // Use real academic data if available
       return {
         permissions: ['read_own_schedule', 'read_own_grades', 'read_own_attendance', 'read_course_info', 'read_public_announcements'],
         accessibleData: {
           ...generalInfo,
           'name': user.name,
-          'nextClass': { time: '11 AM', course: 'Organic Chemistry', location: 'Lab 2B' },
-          'assignmentsDue': { 'Calculus II': 'Tomorrow' },
-          'attendance': '88%',
-          'gpa': '3.7',
-          'grades': {
-            'Calculus II': 'A-',
-            'Organic Chemistry': 'B+',
-            'History of Science': 'A',
-          }
+          'email': user.email,
+          'department': studentAcademicData?.cgpa?.department || 'N/A',
+          'semester': studentAcademicData?.cgpa?.semester || 'N/A',
+          'section': studentAcademicData?.cgpa?.section || 'N/A',
+          'cgpa': studentAcademicData?.cgpa?.cgpa || 'N/A',
+          'currentSGPA': studentAcademicData?.cgpa?.sgpa?.[`sem${studentAcademicData?.cgpa?.semester}`] || 'N/A',
+          'semesterGrades': studentAcademicData?.cgpa?.sgpa || {},
+          'overallAttendance': studentAcademicData?.attendance?.overallAttendance ? `${studentAcademicData.attendance.overallAttendance}%` : 'N/A',
+          'subjectWiseAttendance': studentAcademicData?.attendance?.subjectWiseAttendance || [],
         },
       };
 
@@ -123,29 +123,55 @@ const getRoleBasedContext = (user: User | undefined, documents: Document[], user
 const ChatComponent: React.FC<ChatComponentProps> = ({ user }) => {
     const [prompt, setPrompt] = useState('');
     const [showWelcomeMessage, setShowWelcomeMessage] = useState(true);
-    const [messages, setMessages] = useState<ChatMessage[]>([
-        { 
-            role: 'model', 
-            content: `Hello ${user ? user.name : 'Guest'}! 👋
-
-I'm your advanced CampusAura AI assistant with access to:
-🌐 Live college website data
- Placement statistics and recruitment info
-📅 Upcoming events and workshops
-📚 Campus documents and resources
-
-Ask me anything about your college! I'll provide specific, accurate information from our knowledge base.`
+    
+    // Initialize state variables first
+    const [documents, setDocuments] = useState<Document[]>([]);
+    const [users, setUsers] = useState<User[]>([]);
+    const [studentAcademicData, setStudentAcademicData] = useState<any>(null);
+    const [userProfile, setUserProfile] = useState<any>(null);
+    
+    // Load user-specific chat history from localStorage
+    const getUserChatKey = () => {
+        if (user) {
+            return `chatHistory_${user.email}`;
         }
-    ]);
+        return 'chatHistory_guest';
+    };
+
+    const loadChatHistory = (): ChatMessage[] => {
+        // Generate personalized welcome message
+        let welcomeMessage = `Welcome, ${user ? user.name : 'Guest'}.\n\n`;
+        
+        if (user && userProfile) {
+            if (user.role === UserRole.STUDENT) {
+                if (userProfile.basic?.semester || userProfile.basic?.branch) {
+                    welcomeMessage += `${userProfile.basic?.semester ? `Semester ${userProfile.basic.semester}` : ''} ${userProfile.basic?.branch || ''}\n\n`;
+                }
+            } else if (user.role === UserRole.TEACHER) {
+                welcomeMessage += `Department: ${userProfile.basic?.branch || 'N/A'}\n\n`;
+            } else if (user.role === UserRole.ADMIN) {
+                welcomeMessage += `Administrator Access\n\n`;
+            }
+        }
+        
+        welcomeMessage += `I can assist you with:\n`;
+        welcomeMessage += `• Academic schedules and timetables\n`;
+        welcomeMessage += `• Announcements and updates\n`;
+        welcomeMessage += `• Campus resources and documents\n`;
+        welcomeMessage += `• General inquiries\n`;
+
+        return [{ role: 'model', content: welcomeMessage }];
+    };
+
+    const [messages, setMessages] = useState<ChatMessage[]>(loadChatHistory());
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const chatContainerRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-    const [documents, setDocuments] = useState<Document[]>([]);
-    const [users, setUsers] = useState<User[]>([]);
-
     const [isRecording, setIsRecording] = useState(false);
+    const [isSpeaking, setIsSpeaking] = useState(false);
+    const recognitionRef = useRef<any>(null);
     const liveSessionPromiseRef = useRef<Promise<any> | null>(null);
     const liveSessionRef = useRef<any>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
@@ -153,14 +179,65 @@ Ask me anything about your college! I'll provide specific, accurate information 
     const mediaStreamSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
     const micStreamRef = useRef<MediaStream | null>(null);
 
+    // Initialize speech recognition
+    useEffect(() => {
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+            recognitionRef.current = new SpeechRecognition();
+            recognitionRef.current.continuous = false;
+            recognitionRef.current.interimResults = false;
+            recognitionRef.current.lang = 'en-US';
+
+            recognitionRef.current.onresult = (event: any) => {
+                const transcript = event.results[0][0].transcript;
+                setPrompt(transcript);
+                setIsRecording(false);
+            };
+
+            recognitionRef.current.onerror = (event: any) => {
+                console.error('Speech recognition error:', event.error);
+                setIsRecording(false);
+            };
+
+            recognitionRef.current.onend = () => {
+                setIsRecording(false);
+            };
+        }
+
+        return () => {
+            if (recognitionRef.current) {
+                recognitionRef.current.stop();
+            }
+        };
+    }, []);
+
 
     useEffect(() => {
-        const fetchAdminData = async () => {
-            if (user?.role === UserRole.ADMIN) {
-                try {
-                    const token = localStorage.getItem('authToken');
-                    if (!token) return;
+        const fetchUserData = async () => {
+            const token = localStorage.getItem('authToken');
+            if (!token || !user) return;
 
+            try {
+                // Fetch comprehensive user profile
+                const profileResponse = await fetch('/api/user/profile', {
+                    headers: { 'Authorization': `Bearer ${token}` },
+                });
+                
+                if (profileResponse.ok) {
+                    const profile = await profileResponse.json();
+                    setUserProfile(profile);
+                    
+                    // Also set studentAcademicData for backward compatibility
+                    if (user.role === UserRole.STUDENT && profile.academic && profile.attendance) {
+                        setStudentAcademicData({
+                            cgpa: profile.academic,
+                            attendance: profile.attendance
+                        });
+                    }
+                }
+
+                // Still fetch documents and users for admin
+                if (user?.role === UserRole.ADMIN) {
                     // Fetch documents
                     const docsResponse = await fetch('/api/documents', {
                         headers: { 'Authorization': `Bearer ${token}` },
@@ -178,14 +255,21 @@ Ask me anything about your college! I'll provide specific, accurate information 
                         const usersData: User[] = await usersResponse.json();
                         setUsers(usersData);
                     }
-                } catch (err) {
-                    console.error("Failed to fetch admin data for AI context", err);
                 }
+            } catch (err) {
+                console.error("Failed to fetch user data for AI context", err);
             }
         };
 
-        fetchAdminData();
+        fetchUserData();
     }, [user]);
+
+    // Update welcome message when profile is loaded
+    useEffect(() => {
+        if (userProfile && messages.length === 1) {
+            setMessages(loadChatHistory());
+        }
+    }, [userProfile]);
 
     // Auto-hide welcome message after 8 seconds
     useEffect(() => {
@@ -195,6 +279,57 @@ Ask me anything about your college! I'll provide specific, accurate information 
 
         return () => clearTimeout(timer);
     }, []);
+
+    // Voice input handler
+    const handleVoiceInput = () => {
+        if (!recognitionRef.current) {
+            alert('Speech recognition is not supported in your browser. Please use Chrome, Edge, or Safari.');
+            return;
+        }
+
+        if (isRecording) {
+            recognitionRef.current.stop();
+            setIsRecording(false);
+        } else {
+            setIsRecording(true);
+            recognitionRef.current.start();
+        }
+    };
+
+    // Text-to-speech handler
+    const speakText = (text: string) => {
+        if ('speechSynthesis' in window) {
+            // Stop any ongoing speech
+            window.speechSynthesis.cancel();
+            
+            // Remove markdown formatting for better speech
+            const cleanText = text
+                .replace(/[#*_`~]/g, '') // Remove markdown symbols
+                .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Remove links but keep text
+                .replace(/\n+/g, '. '); // Replace newlines with pauses
+            
+            const utterance = new SpeechSynthesisUtterance(cleanText);
+            utterance.rate = 0.9;
+            utterance.pitch = 1;
+            utterance.volume = 1;
+            
+            utterance.onstart = () => setIsSpeaking(true);
+            utterance.onend = () => setIsSpeaking(false);
+            utterance.onerror = () => setIsSpeaking(false);
+            
+            window.speechSynthesis.speak(utterance);
+        } else {
+            alert('Text-to-speech is not supported in your browser.');
+        }
+    };
+
+    // Stop speech
+    const stopSpeaking = () => {
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
+            setIsSpeaking(false);
+        }
+    };
 
     const MAX_CHAR_LIMIT = 500;
     const suggestions = user 
@@ -357,9 +492,53 @@ Ask me anything about your college! I'll provide specific, accurate information 
         setMessages(prev => [...prev, typingMessage]);
 
         try {
-            const userContext = getRoleBasedContext(user, documents, users);
+            // Use userProfile as primary data source if available, fallback to getRoleBasedContext
+            let userContext;
+            if (userProfile) {
+                // Flatten the nested profile structure for the chatbot
+                const flatProfile: any = {
+                    // Basic info
+                    name: userProfile.basic?.name,
+                    email: userProfile.basic?.email,
+                    role: userProfile.basic?.role,
+                    department: userProfile.basic?.branch,
+                    branch: userProfile.basic?.branch,
+                    semester: userProfile.basic?.semester,
+                    section: userProfile.basic?.section,
+                };
+
+                // Academic data
+                if (userProfile.academic) {
+                    flatProfile.cgpa = userProfile.academic.cgpa;
+                    flatProfile.currentSGPA = userProfile.academic.currentSemesterSGPA;
+                    flatProfile.semesterGrades = userProfile.academic.sgpa;
+                }
+
+                // Attendance data
+                if (userProfile.attendance) {
+                    flatProfile.overallAttendance = userProfile.attendance.overall;
+                    flatProfile.subjectWiseAttendance = userProfile.attendance.subjects;
+                }
+
+                // Timetable data
+                if (userProfile.timetable) {
+                    flatProfile.timetable = userProfile.timetable;
+                }
+
+                // Announcements and documents
+                flatProfile.announcements = userProfile.announcements;
+                flatProfile.documents = userProfile.documents;
+
+                userContext = {
+                    permissions: ['read_own_schedule', 'read_own_grades', 'read_own_attendance', 'read_course_info', 'read_public_announcements'],
+                    accessibleData: flatProfile
+                };
+            } else {
+                // Fallback to old context method
+                userContext = getRoleBasedContext(user, documents, users, studentAcademicData);
+            }
             
-            // Call backend AI proxy with advanced knowledge base
+            // Call backend AI proxy with streaming enabled
             const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: {
@@ -373,7 +552,9 @@ Ask me anything about your college! I'll provide specific, accurate information 
                         name: user?.name || 'Guest',
                         permissions: userContext.permissions,
                         data: userContext.accessibleData
-                    }
+                    },
+                    stream: true, // Enable streaming
+                    cache: true // Enable caching
                 })
             });
 
@@ -382,24 +563,90 @@ Ask me anything about your college! I'll provide specific, accurate information 
                 throw new Error(errorData.error || 'Failed to get AI response');
             }
 
-            const data = await response.json();
-            
-            // Enhanced AI message with knowledge base metadata
-            const aiMessage: ChatMessage = {
-                role: 'model',
-                content: data.content,
-                sources: data.sources && data.sources.length > 0 ? data.sources : undefined,
-                metadata: data.knowledgeBase ? {
-                    model: data.model,
-                    announcementsUsed: data.knowledgeBase.announcementsUsed,
-                    liveDataFetched: data.knowledgeBase.liveDataFetched,
-                    placementsFound: data.knowledgeBase.placementsFound,
-                    eventsFound: data.knowledgeBase.eventsFound
-                } : undefined
-            };
-            
-            // Remove typing indicator and add actual response
-            setMessages(prev => [...prev.slice(0, -1), aiMessage]);
+            // Check if response is streaming (SSE) or regular JSON
+            const contentType = response.headers.get('content-type');
+            const isStreaming = contentType?.includes('text/event-stream');
+
+            if (isStreaming) {
+                // Handle streaming response
+                const reader = response.body?.getReader();
+                const decoder = new TextDecoder();
+                let accumulatedContent = '';
+                let metadata: any = undefined;
+                let sources: any = undefined;
+
+                if (reader) {
+                    try {
+                        while (true) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+
+                            const chunk = decoder.decode(value);
+                            const lines = chunk.split('\n');
+
+                            for (const line of lines) {
+                                if (line.startsWith('data: ')) {
+                                    try {
+                                        const data = JSON.parse(line.slice(6));
+                                        
+                                        if (data.content) {
+                                            accumulatedContent += data.content;
+                                            // Update the last message with accumulated content
+                                            setMessages(prev => [
+                                                ...prev.slice(0, -1),
+                                                { role: 'model', content: accumulatedContent }
+                                            ]);
+                                        }
+
+                                        if (data.metadata) {
+                                            metadata = data.metadata;
+                                        }
+
+                                        if (data.sources) {
+                                            sources = data.sources;
+                                        }
+
+                                        if (data.done) {
+                                            // Final message with metadata
+                                            const finalMessage: ChatMessage = {
+                                                role: 'model',
+                                                content: accumulatedContent,
+                                                sources: sources && sources.length > 0 ? sources : undefined,
+                                                metadata: metadata
+                                            };
+                                            setMessages(prev => [...prev.slice(0, -1), finalMessage]);
+                                        }
+                                    } catch (parseError) {
+                                        console.error('Error parsing SSE data:', parseError);
+                                    }
+                                }
+                            }
+                        }
+                    } finally {
+                        reader.releaseLock();
+                    }
+                }
+            } else {
+                // Handle non-streaming response (fallback)
+                const data = await response.json();
+                
+                // Enhanced AI message with knowledge base metadata
+                const aiMessage: ChatMessage = {
+                    role: 'model',
+                    content: data.content,
+                    sources: data.sources && data.sources.length > 0 ? data.sources : undefined,
+                    metadata: data.knowledgeBase ? {
+                        model: data.model,
+                        announcementsUsed: data.knowledgeBase.announcementsUsed,
+                        liveDataFetched: data.knowledgeBase.liveDataFetched,
+                        placementsFound: data.knowledgeBase.placementsFound,
+                        eventsFound: data.knowledgeBase.eventsFound
+                    } : undefined
+                };
+                
+                // Remove typing indicator and add actual response
+                setMessages(prev => [...prev.slice(0, -1), aiMessage]);
+            }
 
         } catch (err: any) {
             console.error('AI chat error:', err);
@@ -417,12 +664,26 @@ Ask me anything about your college! I'll provide specific, accurate information 
     };
 
     return (
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 flex flex-col h-full max-h-[calc(100vh-120px)] lg:max-h-[calc(100vh-140px)]">
-            <div className="p-4 border-b dark:border-gray-700">
-                <h3 className="text-xl font-semibold text-gray-800 dark:text-white">🧠 Advanced AI Assistant</h3>
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 flex flex-col h-full w-full">
+            <div className="p-3 md:p-4 border-b dark:border-gray-700 flex justify-between items-center flex-shrink-0">
+                <h3 className="text-base md:text-lg lg:text-xl font-semibold text-gray-800 dark:text-white truncate">🧠 Advanced AI Assistant</h3>
+                {user && (
+                    <button
+                        onClick={() => {
+                            const chatKey = getUserChatKey();
+                            localStorage.removeItem(chatKey);
+                            setMessages(loadChatHistory());
+                            setShowWelcomeMessage(true);
+                        }}
+                        className="text-xs px-2 md:px-3 py-1 rounded-md bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors flex-shrink-0"
+                        title="Clear chat history"
+                    >
+                        Clear Chat
+                    </button>
+                )}
             </div>
             
-            <div ref={chatContainerRef} className="flex-grow p-4 space-y-4 overflow-y-auto bg-gray-50 dark:bg-gray-900/50">
+            <div ref={chatContainerRef} className="flex-1 p-3 md:p-4 space-y-3 md:space-y-4 overflow-y-auto bg-gray-50 dark:bg-gray-900/50 min-h-0 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-gray-100 dark:[&::-webkit-scrollbar-track]:bg-gray-900 [&::-webkit-scrollbar-thumb]:bg-black [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:hover:bg-gray-800">
                 {messages.map((msg, index) => {
                     // Hide welcome message (first message) after timer expires
                     if (index === 0 && !showWelcomeMessage) {
@@ -445,15 +706,30 @@ Ask me anything about your college! I'll provide specific, accurate information 
                              <SparklesIcon className="h-5 w-5" />
                            </div>
                         )}
-                         <div className={`max-w-xs md:max-w-md p-3 rounded-2xl ${msg.role === 'user' ? 'bg-indigo-500 text-white rounded-br-none' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-bl-none'}`}>
+                         <div className={`group relative max-w-md md:max-w-2xl p-3 rounded-2xl ${msg.role === 'user' ? 'bg-indigo-500 text-white rounded-br-none' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-bl-none'}`}>
                             {msg.content === '' && msg.role === 'model' ? (
                                 <TypingIndicator />
                             ) : msg.role === 'model' ? (
-                                <div className="text-sm prose prose-sm dark:prose-invert max-w-none">
-                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                        {msg.content}
-                                    </ReactMarkdown>
-                                </div>
+                                <>
+                                    <div className="text-sm prose prose-sm dark:prose-invert max-w-none">
+                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                            {msg.content}
+                                        </ReactMarkdown>
+                                    </div>
+                                    {msg.content && (
+                                        <button
+                                            onClick={() => isSpeaking ? stopSpeaking() : speakText(msg.content)}
+                                            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500"
+                                            title={isSpeaking ? "Stop speaking" : "Read aloud"}
+                                        >
+                                            {isSpeaking ? (
+                                                <SpeakerXMarkIcon className="w-4 h-4" />
+                                            ) : (
+                                                <SpeakerWaveIcon className="w-4 h-4" />
+                                            )}
+                                        </button>
+                                    )}
+                                </>
                             ) : (
                                 <p className="text-sm" style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</p>
                             )}
@@ -484,14 +760,15 @@ Ask me anything about your college! I'll provide specific, accurate information 
                 )}
             </div>
             
-            <div className="p-4 border-t dark:border-gray-700 bg-white dark:bg-gray-800">
+            <div className="p-3 md:p-4 border-t dark:border-gray-700 bg-white dark:bg-gray-800 flex-shrink-0">
                  <form onSubmit={handleSendMessage} className="flex items-start gap-3">
                     <button
                         type="button"
-                        onClick={handleToggleRecording}
+                        onClick={handleVoiceInput}
                         disabled={isLoading}
-                        className={`flex-shrink-0 flex items-center justify-center w-12 h-12 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:focus:ring-offset-gray-800 ${isRecording ? 'text-red-500 bg-red-100 dark:bg-red-900/20' : 'text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700'}`}
-                        aria-label={isRecording ? 'Stop recording' : 'Start recording'}
+                        className={`flex-shrink-0 flex items-center justify-center w-12 h-12 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:focus:ring-offset-gray-800 ${isRecording ? 'text-red-500 bg-red-100 dark:bg-red-900/20 animate-pulse' : 'text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700'}`}
+                        aria-label={isRecording ? 'Stop recording' : 'Start voice input'}
+                        title={isRecording ? 'Stop recording' : 'Click to speak your question'}
                     >
                         <MicrophoneIcon className="h-5 w-5" />
                     </button>
@@ -507,7 +784,7 @@ Ask me anything about your college! I'll provide specific, accurate information 
                                     (e.target as HTMLTextAreaElement).form?.requestSubmit();
                                 }
                             }}
-                            placeholder={isRecording ? 'Listening...' : 'Ask CampusAura anything...'}
+                            placeholder={isRecording ? '🎤 Listening...' : 'Ask CampusAura anything...'}
                             disabled={isLoading}
                             maxLength={MAX_CHAR_LIMIT}
                             className="w-full p-3 pr-20 text-sm text-gray-800 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 border border-transparent rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"

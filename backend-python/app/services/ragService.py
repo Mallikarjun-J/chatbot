@@ -6,7 +6,6 @@ Combines semantic search with LLM for accurate answers
 from typing import Dict, List, Optional
 from app.services.vectorStore import vector_store
 from app.config import settings
-from openai import OpenAI
 
 class RAGService:
     def __init__(self):
@@ -20,28 +19,52 @@ class RAGService:
             import google.generativeai as genai
             genai.configure(api_key=gemini_key)
             self.gemini_model = genai.GenerativeModel('models/gemini-2.5-flash')
-        elif settings.OPENAI_API_KEY:
-            # Fallback to OpenAI if Gemini not available
-            self.use_openai = True
-            self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
-            self.model = "gpt-4o-mini"  # Use available model
+
     
-    def query(self, question: str, n_results: int = 5) -> Dict:
+    def query(self, question: str, n_results: int = 10) -> Dict:
         """
-        Answer question using RAG
-        1. Retrieve relevant context from vector store
-        2. Generate answer using LLM with context
+        Answer question using improved RAG
+        1. Retrieve MORE relevant context from vector store
+        2. Filter by relevance
+        3. Generate answer using LLM with context
         """
         
-        # Step 1: Retrieve relevant context
+        # Step 1: Retrieve more results for better coverage
         search_results = vector_store.search(question, n_results=n_results)
         
-        if not search_results['documents']:
+        if not search_results['documents'] or len(search_results['documents']) == 0:
             return {
-                'answer': "I couldn't find relevant information in the placement database.",
+                'answer': "I couldn't find relevant information in the placement database. Could you rephrase your question or be more specific?",
                 'sources': [],
                 'confidence': 'low'
             }
+        
+        # Step 2: Filter by relevance score (keep more lenient threshold)
+        filtered_docs = []
+        filtered_metadata = []
+        filtered_distances = []
+        
+        for doc, metadata, distance in zip(
+            search_results['documents'], 
+            search_results['metadatas'], 
+            search_results['distances']
+        ):
+            if distance < 1.2:  # More lenient threshold for better recall
+                filtered_docs.append(doc)
+                filtered_metadata.append(metadata)
+                filtered_distances.append(distance)
+        
+        if not filtered_docs:
+            return {
+                'answer': "I found some related information, but it may not directly answer your question. Could you be more specific?",
+                'sources': search_results['metadatas'][:2] if search_results['metadatas'] else [],
+                'confidence': 'low'
+            }
+        
+        # Use top 5 most relevant docs
+        search_results['documents'] = filtered_docs[:5]
+        search_results['metadatas'] = filtered_metadata[:5]
+        search_results['distances'] = filtered_distances[:5]
         
         # Step 2: Build context from retrieved documents
         context = self._build_context(search_results)

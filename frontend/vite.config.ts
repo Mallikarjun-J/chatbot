@@ -5,7 +5,10 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   server: {
     port: 3000,
-    host: '0.0.0.0',
+    host: true,
+    allowedHosts: [
+    'overcheap-kellie-stereophonically.ngrok-free.app',
+  ],
     proxy: {
       '/api': {
         target: 'http://localhost:3001',
